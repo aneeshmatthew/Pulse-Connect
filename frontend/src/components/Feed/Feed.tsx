@@ -2,7 +2,7 @@ import { useEffect, useRef, useCallback, useState } from 'react';
 import { useQuery, useSubscription } from '@apollo/client';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { motion, AnimatePresence } from 'framer-motion';
-import { RefreshCw, Wifi } from 'lucide-react';
+import { RefreshCw } from 'lucide-react';
 import { GET_FEED, NEW_POST_SUB } from '@/lib/graphql';
 import { PostCard } from '@/components/Post/PostCard';
 import { CreatePost } from '@/components/Post/CreatePost';
@@ -11,7 +11,8 @@ import { PostSkeleton } from '@/components/UI/Skeleton';
 import { useAuthStore } from '@/store';
 import toast from 'react-hot-toast';
 
-const LIMIT = 10;
+// Load 15 per page — gives virtual scroll enough items to demonstrate
+const LIMIT = 15;
 
 export function Feed() {
   const { isAuthenticated } = useAuthStore();
@@ -19,13 +20,14 @@ export function Feed() {
   const [hasNewPosts, setHasNewPosts] = useState(false);
   const loadingMore = useRef(false);
 
-  const { data, loading, fetchMore, refetch } = useQuery(GET_FEED, {
+  const { data, loading, fetchMore, refetch, networkStatus } = useQuery(GET_FEED, {
     variables: { limit: LIMIT },
     skip: !isAuthenticated,
     notifyOnNetworkStatusChange: true,
+    fetchPolicy: 'cache-and-network',
   });
 
-  // New-post subscription — show banner, don't auto-insert (avoid layout thrash)
+  // New-post subscription — banner instead of auto-insert to avoid layout jumps
   useSubscription(NEW_POST_SUB, {
     skip: !isAuthenticated,
     onData: () => setHasNewPosts(true),
@@ -34,6 +36,8 @@ export function Feed() {
   const posts: any[] = data?.feed?.posts ?? [];
   const hasMore: boolean = data?.feed?.hasMore ?? false;
   const nextCursor: string | null = data?.feed?.nextCursor ?? null;
+  // Show skeletons on first load (no posts yet), not on subsequent fetches
+  const isInitialLoad = loading && posts.length === 0;
 
   const handleRefresh = useCallback(async () => {
     setHasNewPosts(false);
@@ -46,35 +50,45 @@ export function Feed() {
     loadingMore.current = true;
     try {
       await fetchMore({ variables: { cursor: nextCursor, limit: LIMIT } });
+    } catch {
+      toast.error('Failed to load more posts');
     } finally {
       loadingMore.current = false;
     }
   }, [hasMore, loading, nextCursor, fetchMore]);
 
-  const totalCount = posts.length + (loading && !posts.length ? LIMIT : 0);
+  // Virtual items = real posts + trailing skeletons while loading more
+  const skeletonCount = loading && posts.length > 0 ? 3 : isInitialLoad ? LIMIT : 0;
+  const totalCount = posts.length + skeletonCount;
 
   const rowVirtualizer = useVirtualizer({
     count: totalCount,
     getScrollElement: () => parentRef.current,
-    estimateSize: () => 440,
-    overscan: 3,
-    measureElement: (el) => el?.getBoundingClientRect().height ?? 440,
+    estimateSize: () => 460,      // good initial estimate; actual measured after mount
+    overscan: 4,
+    measureElement: (el) => el?.getBoundingClientRect().height ?? 460,
   });
 
-  // Infinite scroll: trigger fetchMore when last visible item is near the end
+  // Infinite scroll trigger — load more when 3rd-to-last post is visible
   useEffect(() => {
     const virtualItems = rowVirtualizer.getVirtualItems();
-    if (!virtualItems.length) return;
+    if (!virtualItems.length || !posts.length) return;
     const lastVisible = virtualItems[virtualItems.length - 1];
-    if (lastVisible.index >= posts.length - 3 && hasMore && !loading) {
+    if (lastVisible.index >= posts.length - 3) {
       handleLoadMore();
     }
+  // Stable dep: only re-run when the last visible index or post count changes
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rowVirtualizer.getVirtualItems().length, posts.length, hasMore, loading]);
+  }, [
+    rowVirtualizer.getVirtualItems().at(-1)?.index,
+    posts.length,
+    hasMore,
+    loading,
+  ]);
 
   return (
-    <div className="flex flex-col h-[calc(100vh-64px)] gap-0">
-      {/* Fixed header section — Stories + Composer */}
+    <div className="flex flex-col h-[calc(100vh-64px)]">
+      {/* ── Fixed header (Stories + Composer) ─────────────────────────── */}
       <div className="flex-shrink-0 space-y-3 pb-3">
         <div className="bg-white dark:bg-surface-dark-2 rounded-xl shadow-card dark:shadow-card-dark p-4">
           <StoriesBar />
@@ -82,70 +96,72 @@ export function Feed() {
         <CreatePost />
       </div>
 
-      {/* New posts banner */}
+      {/* ── New posts banner ──────────────────────────────────────────── */}
       <AnimatePresence>
         {hasNewPosts && (
           <motion.button
-            initial={{ y: -40, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            exit={{ y: -40, opacity: 0 }}
+            initial={{ opacity: 0, y: -12 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -12 }}
             onClick={handleRefresh}
             className="flex-shrink-0 flex items-center justify-center gap-2 py-2.5 mb-2 bg-brand-500 hover:bg-brand-600 text-white text-sm font-semibold rounded-xl shadow-md transition-colors"
           >
             <RefreshCw size={15} />
-            New posts — click to refresh
+            New posts — tap to refresh
           </motion.button>
         )}
       </AnimatePresence>
 
-      {/* Virtualized scroll area */}
+      {/* ── Virtualized feed ─────────────────────────────────────────── */}
       <div
         ref={parentRef}
         className="flex-1 overflow-y-auto"
-        style={{ scrollbarWidth: 'none', WebkitOverflowScrolling: 'touch' } as any}
+        style={{ scrollbarWidth: 'none', WebkitOverflowScrolling: 'touch' } as React.CSSProperties}
       >
-        {/* Empty state */}
-        {!loading && posts.length === 0 && (
-          <div className="flex flex-col items-center justify-center py-20 text-gray-400 dark:text-gray-500">
-            <Wifi size={48} className="mb-4 opacity-30" />
-            <p className="text-lg font-medium">Your feed is empty</p>
-            <p className="text-sm mt-1">Follow people or add friends to see posts here</p>
+        {/* Initial skeleton state */}
+        {isInitialLoad && (
+          <div className="space-y-3">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <PostSkeleton key={i} />
+            ))}
           </div>
         )}
 
-        <div style={{ height: `${rowVirtualizer.getTotalSize()}px`, position: 'relative' }}>
-          {rowVirtualizer.getVirtualItems().map((virtualItem) => {
-            const post = posts[virtualItem.index];
-            const isPlaceholder = !post;
+        {/* Virtual list */}
+        {!isInitialLoad && (
+          <div style={{ height: `${rowVirtualizer.getTotalSize()}px`, position: 'relative' }}>
+            {rowVirtualizer.getVirtualItems().map((virtualItem) => {
+              const post = posts[virtualItem.index];
+              const isSkeleton = !post; // trailing skeleton while loading more
 
-            return (
-              <div
-                key={virtualItem.key}
-                data-index={virtualItem.index}
-                ref={rowVirtualizer.measureElement}
-                style={{
-                  position: 'absolute',
-                  top: 0,
-                  left: 0,
-                  width: '100%',
-                  transform: `translateY(${virtualItem.start}px)`,
-                  paddingBottom: '12px',
-                }}
-              >
-                {isPlaceholder ? (
-                  <PostSkeleton />
-                ) : (
-                  <PostCard key={post.id} post={post} />
-                )}
-              </div>
-            );
-          })}
-        </div>
+              return (
+                <div
+                  key={virtualItem.key}
+                  data-index={virtualItem.index}
+                  ref={rowVirtualizer.measureElement}
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    width: '100%',
+                    transform: `translateY(${virtualItem.start}px)`,
+                    paddingBottom: '12px',
+                  }}
+                >
+                  {isSkeleton ? <PostSkeleton /> : <PostCard post={post} />}
+                </div>
+              );
+            })}
+          </div>
+        )}
 
-        {!hasMore && posts.length > 0 && (
-          <p className="text-center py-8 text-sm text-gray-400 dark:text-gray-500 select-none">
-            You're all caught up 🎉
-          </p>
+        {/* End of feed */}
+        {!hasMore && posts.length > 0 && !loading && (
+          <div className="flex flex-col items-center py-10 gap-2 text-gray-400 dark:text-gray-500 select-none">
+            <span className="text-2xl">🎉</span>
+            <p className="text-sm font-medium">You're all caught up!</p>
+            <p className="text-xs">You've seen all {posts.length} posts</p>
+          </div>
         )}
       </div>
     </div>

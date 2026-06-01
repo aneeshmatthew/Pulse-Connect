@@ -5,6 +5,8 @@ import { GraphQLContext, requireAuth, EVENTS } from '../context';
 import { GraphQLError } from 'graphql';
 import { validate, CreatePostSchema } from '../../lib/validation';
 
+const MIN_FEED_THRESHOLD = 5; // if fewer than this, pad with public posts
+
 function decodeCursor(cursor: string): Date {
   try {
     return new Date(Buffer.from(cursor, 'base64url').toString('utf8'));
@@ -17,34 +19,85 @@ function encodeCursor(date: Date): string {
   return Buffer.from(date.toISOString(), 'utf8').toString('base64url');
 }
 
+/**
+ * Smart feed builder:
+ * 1. Always fetches friend/own posts first (social graph)
+ * 2. If results < threshold (new user / no friends), backfills with recent public posts
+ * 3. Deduplicates so the same post never appears twice
+ */
+async function buildFeed(
+  userId: any,
+  friendIds: any[],
+  cursor: string | undefined,
+  safeLimit: number
+) {
+  const authorIds = [userId, ...friendIds];
+  const cursorFilter = cursor ? { createdAt: { $lt: decodeCursor(cursor) } } : {};
+
+  // Primary query: own + friends posts
+  const primaryQuery: any = {
+    author: { $in: authorIds },
+    visibility: { $in: ['public', 'friends'] },
+    ...cursorFilter,
+  };
+
+  const primaryPosts = await Post.find(primaryQuery)
+    .sort({ createdAt: -1 })
+    .limit(safeLimit + 1)
+    .populate('author', '-password')
+    .lean();
+
+  // If we have enough posts from friends, return early
+  if (primaryPosts.length >= safeLimit + 1) {
+    const hasMore = true;
+    const items = primaryPosts.slice(0, safeLimit);
+    return { posts: items, hasMore, nextCursor: encodeCursor(items[items.length - 1].createdAt) };
+  }
+
+  if (primaryPosts.length > safeLimit) {
+    const items = primaryPosts.slice(0, safeLimit);
+    return { posts: items, hasMore: true, nextCursor: encodeCursor(items[items.length - 1].createdAt) };
+  }
+
+  // Backfill with recent public posts the user hasn't seen yet
+  const seenIds = new Set(primaryPosts.map((p: any) => p._id.toString()));
+  const needed = safeLimit + 1 - primaryPosts.length;
+
+  const publicQuery: any = {
+    _id: { $nin: Array.from(seenIds) },
+    author: { $nin: authorIds }, // exclude posts already in primary
+    visibility: 'public',
+    ...cursorFilter,
+  };
+
+  const publicPosts = await Post.find(publicQuery)
+    .sort({ createdAt: -1 })
+    .limit(needed)
+    .populate('author', '-password')
+    .lean();
+
+  // Merge: friend posts first, then public discovery posts
+  const merged = [...primaryPosts, ...publicPosts];
+
+  // Re-sort by createdAt so timeline is coherent
+  merged.sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+  const hasMore = merged.length > safeLimit;
+  const items = hasMore ? merged.slice(0, safeLimit) : merged;
+  const nextCursor = items.length > 0 ? encodeCursor(items[items.length - 1].createdAt) : null;
+
+  return { posts: items, hasMore, nextCursor };
+}
+
 export const postResolvers = {
   Query: {
     feed: async (_: unknown, { cursor, limit = 10 }: any, { user }: GraphQLContext) => {
       requireAuth(user);
-
       const safeLimit = Math.min(Math.max(1, limit), 50);
       const friendIds = user.friends ?? [];
-      const authorIds = [user._id, ...friendIds];
 
-      const query: any = {
-        author: { $in: authorIds },
-        visibility: { $in: ['public', 'friends'] },
-      };
-      if (cursor) query.createdAt = { $lt: decodeCursor(cursor) };
-
-      const posts = await Post.find(query)
-        .sort({ createdAt: -1 })
-        .limit(safeLimit + 1)
-        .populate('author', '-password')
-        .populate('tags', 'id username firstName lastName avatar isOnline isVerified')
-        .lean();
-
-      const hasMore = posts.length > safeLimit;
-      const items = hasMore ? posts.slice(0, safeLimit) : posts;
-      const nextCursor = hasMore ? encodeCursor(items[items.length - 1].createdAt) : null;
-
-      // No countDocuments — too expensive on every page load
-      return { posts: items, hasMore, nextCursor, total: -1 };
+      const result = await buildFeed(user._id, friendIds, cursor, safeLimit);
+      return { ...result, total: -1 };
     },
 
     exploreFeed: async (_: unknown, { cursor, limit = 10 }: any) => {
@@ -76,10 +129,7 @@ export const postResolvers = {
         .lean();
 
       if (!post) return null;
-
-      // Fire-and-forget view count increment
       Post.findByIdAndUpdate(id, { $inc: { viewCount: 1 } }).exec();
-
       return post;
     },
 
@@ -89,7 +139,6 @@ export const postResolvers = {
       const isFriend = user?.friends.some((id: any) => id.toString() === userId);
 
       const query: any = { author: userId };
-      // Visibility gating
       if (!isOwner) {
         query.visibility = isFriend ? { $in: ['public', 'friends'] } : 'public';
       }
@@ -114,7 +163,6 @@ export const postResolvers = {
       requireAuth(user);
       const data = validate(CreatePostSchema, input);
 
-      // Must have content or media
       if (!data.content?.trim() && !data.media?.length) {
         throw new GraphQLError('Post must have content or media', {
           extensions: { code: 'BAD_USER_INPUT' },
@@ -133,9 +181,7 @@ export const postResolvers = {
       await post.save();
       await post.populate('author', '-password');
 
-      // Publish without awaiting — don't block the response
       pubsub.publish(EVENTS.NEW_POST, { newPost: post.toObject() });
-
       return post;
     },
 
@@ -169,7 +215,6 @@ export const postResolvers = {
         throw new GraphQLError('Not authorized', { extensions: { code: 'FORBIDDEN' } });
       }
 
-      // Delete post + all related comments + notifications in parallel
       await Promise.all([
         Post.findByIdAndDelete(id),
         Comment.deleteMany({ post: id }),
@@ -197,7 +242,6 @@ export const postResolvers = {
 
       await post.save();
 
-      // Notify post author only on new reaction, not on change
       if (isNew && (post.author as any)._id.toString() !== user._id.toString()) {
         Notification.create({
           recipient: (post.author as any)._id,
@@ -244,7 +288,6 @@ export const postResolvers = {
       });
       await sharedPost.save();
 
-      // Update share count without blocking
       Post.findByIdAndUpdate(postId, { $addToSet: { shares: user._id } }).exec();
 
       await sharedPost.populate('author', '-password');
@@ -268,7 +311,6 @@ export const postResolvers = {
   Post: {
     id: (parent: any) => parent._id?.toString() ?? parent.id,
 
-    // Use DataLoader for batched comment counts
     commentsCount: async (parent: any, _: unknown, { loaders }: GraphQLContext) => {
       return loaders.commentCountLoader.load(parent._id.toString());
     },

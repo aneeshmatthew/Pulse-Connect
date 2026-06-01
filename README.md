@@ -116,7 +116,7 @@ socialapp/
 ```bash
 git clone <repo>
 cd socialapp
-npm setup
+npm install
 npm install --workspace=backend
 npm install --workspace=frontend
 ```
@@ -137,7 +137,7 @@ FRONTEND_URL=http://localhost:5173
 cd backend
 npm run seed
 # Creates 6 demo users, posts, stories, and a conversation
-# Login: demo@example.com / Password1
+# Login: demo@example.com / password123
 ```
 
 ### 4. Start Development
