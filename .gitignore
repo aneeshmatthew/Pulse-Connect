@@ -26,3 +26,4 @@ node_modules/.vite/
 # Misc
 .DS_Store
 .vscode/
+frontend/node_modules/date-fns/cdn.min.js
