@@ -116,7 +116,7 @@ socialapp/
 ```bash
 git clone <repo>
 cd socialapp
-npm install
+npm setup
 npm install --workspace=backend
 npm install --workspace=frontend
 ```
