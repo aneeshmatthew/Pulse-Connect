@@ -311,6 +311,9 @@ export const postResolvers = {
   Post: {
     id: (parent: any) => parent._id?.toString() ?? parent.id,
 
+    // ✅ FIX: DB stores lowercase ('public') but GraphQL enum Visibility requires uppercase ('PUBLIC')
+    visibility: (parent: any) => (parent.visibility ?? 'public').toUpperCase(),
+
     commentsCount: async (parent: any, _: unknown, { loaders }: GraphQLContext) => {
       return loaders.commentCountLoader.load(parent._id.toString());
     },
@@ -343,5 +346,25 @@ export const postResolvers = {
         .populate('author', '-password')
         .lean();
     },
+  },
+
+  // ✅ FIX: Reaction.type stored as 'like' in DB, schema enum ReactionType expects 'LIKE'
+  // This resolver applies everywhere Reaction appears — Post reactions, Comment reactions
+  Reaction: {
+    type: (parent: any) => (parent.type ?? 'like').toUpperCase(),
+    user: async (parent: any, _: unknown, { loaders }: GraphQLContext) => {
+      // If already populated (object with _id), return directly
+      if (parent.user && typeof parent.user === 'object' && parent.user._id) {
+        return parent.user;
+      }
+      const userId = parent.user?.toString();
+      if (!userId) return null;
+      return loaders.userLoader.load(userId);
+    },
+  },
+
+  // ✅ FIX: Media.type stored as 'image'/'video'/'gif' in DB, schema enum MediaType expects 'IMAGE'/'VIDEO'/'GIF'
+  Media: {
+    type: (parent: any) => (parent.type ?? 'image').toUpperCase(),
   },
 };

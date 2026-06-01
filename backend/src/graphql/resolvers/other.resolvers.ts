@@ -140,6 +140,10 @@ export const commentResolvers = {
         .lean();
     },
   },
+
+  // ✅ Comment reactions share the same Reaction type — type field resolver
+  // is already registered globally in post.resolvers.ts but we ensure it
+  // applies here too via the merged resolver map.
 };
 
 // ─── Notifications ────────────────────────────────────────────────────────────
@@ -183,6 +187,8 @@ export const notificationResolvers = {
 
   Notification: {
     id: (parent: any) => parent._id?.toString() ?? parent.id,
+    // ✅ DB stores 'friend_request', schema enum expects 'FRIEND_REQUEST'
+    type: (parent: any) => (parent.type ?? '').toUpperCase(),
   },
 };
 
@@ -303,6 +309,11 @@ export const storyResolvers = {
       return (parent.views ?? []).some(
         (v: any) => v.user.toString() === user._id.toString()
       );
+    },
+    // StoryMedia.type is String! so no enum issue — keep lowercase
+    media: (parent: any) => {
+      if (!parent.media) return null;
+      return { ...parent.media, type: (parent.media.type ?? 'image').toLowerCase() };
     },
   },
 };
