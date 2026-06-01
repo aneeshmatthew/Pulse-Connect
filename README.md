@@ -129,7 +129,20 @@ MONGODB_URI=mongodb://localhost:27017/socialapp
 JWT_SECRET=your-super-secret-key
 PORT=4000
 FRONTEND_URL=http://localhost:5173
-```
+
+NODE_ENV=development
+PORT=4000
+
+# Your Atlas connection string
+MONGODB_URI=mongodb+srv://mathewanm_db_user:<db_password>@cluster0.p3auebr.mongodb.net/SocialApp?retryWrites=true&serverSelectionTimeoutMS=5000
+
+# CHANGE THIS in production — at least 32 random characters
+JWT_SECRET=change-me-to-a-long-random-secret-in-production
+JWT_EXPIRES_IN=7d
+
+# Frontend URL (used for CORS)
+FRONTEND_URL=http://localhost:5173
+
 
 ### 3. Seed Demo Data
 
