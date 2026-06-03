@@ -80,7 +80,7 @@ export const userResolvers = {
       const notification = await Notification.create({
         recipient: userId,
         sender: user._id,
-        type: 'friend_request',
+        type: 'FRIEND_REQUEST',
         message: `${user.firstName} ${user.lastName} sent you a friend request`,
       });
 
@@ -113,7 +113,7 @@ export const userResolvers = {
       const notification = await Notification.create({
         recipient: userId,
         sender: user._id,
-        type: 'friend_accept',
+        type: 'FRIEND_ACCEPT',
         message: `${user.firstName} ${user.lastName} accepted your friend request`,
       });
 

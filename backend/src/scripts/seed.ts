@@ -111,6 +111,48 @@ const POST_TEMPLATES = [
   { content: "Ordered 'just a salad' at lunch and spent $28. Salads have no business being that expensive. And it was good. I'm furious." },
   { content: "Walked into the store for one thing. Left with eleven things. Not the one thing. Classic." },
   { content: "The audacity of Mondays. Genuinely cannot believe it's already another week. Time is a flat circle and we're all just here 😤" },
+
+  // 40 more to reach 100 total
+  { content: "Finally finished the renovation 🏠 Eight months of dust, chaos, and questionable decisions. Totally worth it.", imageIdx: 0 },
+  { content: "Cooked for 20 people at Thanksgiving this year. Survived. Barely. Never again until next year. 🦃" },
+  { content: "Ran into an old friend at the airport. We hadn't spoken in 7 years. Two hours later we'd solved most of our problems 😂", feeling: '😊 happy' },
+  { content: "Learning guitar at 35 is humbling but I just played a full song without stopping 🎸 Month 4 of this chaos." },
+  { content: "Watched the sunrise this morning for the first time in years. Some things you forget how good they are until you do them again 🌅", imageIdx: 19 },
+  { content: "My sourdough starter turned 1 year old today. I've kept it alive longer than most of my plants. Proud parent 🍞" },
+  { content: "Spent the day volunteering at the food bank. Life-changing perspective shift. Do it if you haven't." },
+  { content: "Finished my first triathlon! 🏊🚴🏃 Did not look graceful. Did not care. Got the medal.", feeling: '🥳 celebrating', location: 'Ironman 70.3' },
+  { content: "Just negotiated a 20% raise. Months of research, one 15-minute conversation. Know your worth. Ask for it. 💰", feeling: '🥳 celebrating' },
+  { content: "Moved to a new city alone at 27. One year later — best decision I ever made and I only cried about it twice 🏙️", imageIdx: 9 },
+  { content: "The gym was empty at 6am and it felt like the whole place was mine. This is why morning workouts are a religion 💪", imageIdx: 12, feeling: '💪 motivated' },
+  { content: "Made fresh pasta from scratch with my grandmother's recipe. The smell alone sent me back 30 years 🍝", imageIdx: 6, feeling: '🙏 grateful' },
+  { content: "Therapist said 'it sounds like you already know the answer' and she was right and I hate that 😅" },
+  { content: "Reading 52 books in a year seemed crazy. Finished book 47 today. You really can do most things if you just do them daily 📚" },
+  { content: "First solo travel trip: Tokyo for 10 days. Every fear I had was wrong. Every expectation was beaten. Go 🇯🇵", imageIdx: 9, location: 'Tokyo, Japan', feeling: '😍 loved' },
+  { content: "Found my old journal from 10 years ago. Half the things I was afraid of never happened. Half the things I hoped for did. Time is wild." },
+  { content: "My plant collection has officially taken over the apartment 🌿 I am not okay and everything is beautiful.", imageIdx: 2, feeling: '😊 happy' },
+  { content: "Gave my two weeks notice today 🙏 Terrifying. Exciting. The right call. Sometimes you just know." },
+  { content: "Camping off-grid for a week with no phone. Came back a completely different person. Or maybe the same person but cleaner inside 🏕️", imageIdx: 1 },
+  { content: "My niece said 'you're my favourite because you're silly' and honestly that's the review I needed 👧❤️", feeling: '😍 loved' },
+  { content: "Three years sober today 🎉 What started as a hard choice became the best chapter of my life. One day at a time.", feeling: '🥳 celebrating' },
+  { content: "Renovated my home office and productivity tripled. Turns out your environment is doing 40% of the work 💻", imageIdx: 0 },
+  { content: "Met my internet friend IRL for the first time after 4 years. Exactly who I expected. Better than I hoped 🤝", feeling: '😊 happy' },
+  { content: "Bought a road bike on a whim. First 50km done. My legs are destroyed and I already bought a helmet 🚴", feeling: '💪 motivated' },
+  { content: "Cooked a full Korean BBQ dinner at home. The prep took 3 hours. The eating took 20 minutes. Zero regrets 🥩🔥", imageIdx: 7 },
+  { content: "Wrote a letter to myself 5 years ago and opened it today. I handled most of it. Some of it handled me. Try this." },
+  { content: "My dog learned to open the fridge. This is partly impressive and mostly a problem 🐕", imageIdx: 5 },
+  { content: "Watched the northern lights for the first time tonight 🌌 The photos don't do it justice. Nothing does. Just go.", imageIdx: 19, location: 'Tromsø, Norway', feeling: '😍 loved' },
+  { content: "Left corporate. Started freelancing. Month 6: made more than my old salary in a single month. The fear was worth it.", feeling: '🥳 celebrating' },
+  { content: "Brunch with people who make you feel lighter. That's it. That's the tweet. 🥂", imageIdx: 14, feeling: '😊 happy' },
+  { content: "Signed up for a pottery class because I needed something that had nothing to do with screens. It's harder than it looks and I love it 🏺" },
+  { content: "Road trip with no itinerary: drove 1400km in 4 days, saw 6 cities, got lost twice, found one amazing diner 🚗", location: 'Pacific Coast Highway' },
+  { content: "Adopted a senior cat. Everyone said get a kitten. I'm so glad I didn't. 11 years old, maximum dignity, maximum nap 🐱", imageIdx: 4, feeling: '😍 loved' },
+  { content: "The best investment I made this year was in sleep. Wild that we treat rest like laziness. 8 hours changed everything 💤" },
+  { content: "First art piece I've finished in 5 years 🎨 Didn't matter that it wasn't perfect. Mattered that I started.", feeling: '🥳 celebrating' },
+  { content: "My kids asked me to explain the internet today and I realised I cannot. Parent of the year 👨‍👩‍👧", feeling: '😂 haha' },
+  { content: "Deleted Instagram for 30 days. Came back calmer, more creative, slightly bored. The boredom was the point 📵" },
+  { content: "Coffee shop I've worked from for 3 years is closing. Said goodbye to the barista who knew my order before I spoke. These small relationships matter 😢", imageIdx: 11 },
+  { content: "Submitted my novel manuscript today after 4 years of work ✍️ Don't care about publication right now. I finished. That's the win.", feeling: '🥳 celebrating' },
+  { content: "Sometimes the most radical thing you can do is take a full day off, eat good food, and go to bed early. Radical rest 🛌" },
 ];
 
 const COMMENT_BANK = [
@@ -136,7 +178,7 @@ const COMMENT_BANK = [
   "Okay but WHERE did you get that",
 ];
 
-const REACTION_TYPES = ['like', 'love', 'haha', 'wow', 'sad', 'angry'] as const;
+const REACTION_TYPES = ['LIKE', 'LOVE', 'HAHA', 'WOW', 'SAD', 'ANGRY'] as const;
 
 function pick<T>(arr: T[]): T {
   return arr[Math.floor(Math.random() * arr.length)];
@@ -163,12 +205,12 @@ async function seed() {
   await mongoose.connect(mongoURI, { serverSelectionTimeoutMS: 15000 });
   console.log('✅ Connected\n');
 
-  // Wipe
+  // ── Wipe ALL existing data then reseed from scratch ──────────────────────
   await Promise.all([
     User.deleteMany({}), Post.deleteMany({}), Comment.deleteMany({}),
     Story.deleteMany({}), Conversation.deleteMany({}), Message.deleteMany({}),
   ]);
-  console.log('🧹 Cleared existing data');
+  console.log('🧹 Cleared all existing data');
 
   // ── 1. Users ─────────────────────────────────────────────────────────────
   const userDefs = [
@@ -220,7 +262,7 @@ async function seed() {
   }
   console.log(`🤝 Created ${friendPairs.length} friendships`);
 
-  // ── 3. Posts — 60+ posts spread over 14 days ──────────────────────────────
+  // ── 3. Posts — 100 posts spread over 30 days ─────────────────────────────
   const postDocs: any[] = [];
 
   for (let i = 0; i < POST_TEMPLATES.length; i++) {
@@ -243,7 +285,7 @@ async function seed() {
         createdAt: new Date(),
       })),
       viewCount: Math.floor(Math.random() * 1200) + 50,
-      createdAt: daysAgo(Math.floor(i / 4), 8), // spread over ~14 days
+      createdAt: daysAgo(Math.floor(i * 30 / POST_TEMPLATES.length), 8), // spread over 30 days
     });
     await post.save();
     postDocs.push(post);

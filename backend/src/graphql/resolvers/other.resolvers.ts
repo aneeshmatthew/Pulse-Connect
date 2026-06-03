@@ -12,12 +12,13 @@ export const commentResolvers = {
   Query: {
     comments: async (_: unknown, { postId, limit = 10, offset = 0 }: any, { user }: GraphQLContext) => {
       const safeLimit = Math.min(Math.max(1, limit), 50);
-      return Comment.find({ post: postId, parentComment: null })
+      const comments = await Comment.find({ post: postId, parentComment: null })
         .sort({ createdAt: 1 })
         .skip(Math.max(0, offset))
         .limit(safeLimit)
-        .populate('author', '-password')
+        .populate({ path: 'author', select: '-password', match: { _id: { $exists: true } } })
         .lean();
+      return (comments as any[]).filter((c: any) => c.author != null);
     },
   },
 
@@ -60,7 +61,7 @@ export const commentResolvers = {
         Notification.create({
           recipient: (post as any).author,
           sender: user._id,
-          type: parentCommentId ? 'comment_reply' : 'post_comment',
+          type: parentCommentId ? 'COMMENT_REPLY' : 'POST_COMMENT',
           entityId: postId,
           entityType: 'post',
           message: `${user.firstName} ${user.lastName} ${parentCommentId ? 'replied to a comment' : 'commented on your post'}`,
@@ -131,19 +132,25 @@ export const commentResolvers = {
   Comment: {
     id: (parent: any) => parent._id?.toString() ?? parent.id,
     repliesCount: (parent: any) => parent.replies?.length ?? 0,
+
+    // Mongoose returns {} for absent nested objects — guard so url: String! never fails
+    media: (parent: any) => {
+      const m = parent.media;
+      if (!m || !m.url) return null;
+      return m;
+    },
+
     replies: async (parent: any, { limit = 5, offset = 0 }: any) => {
       return Comment.find({ parentComment: parent._id })
         .sort({ createdAt: 1 })
         .skip(Math.max(0, offset))
         .limit(Math.min(limit, 20))
-        .populate('author', '-password')
+        .populate({ path: 'author', select: '-password', match: { _id: { $exists: true } } })
         .lean();
     },
   },
-
-  // ✅ Comment reactions share the same Reaction type — type field resolver
-  // is already registered globally in post.resolvers.ts but we ensure it
-  // applies here too via the merged resolver map.
+  // Reaction and Media type resolvers are registered in post.resolvers.ts
+  // and applied globally by mergeResolvers — no duplication needed here.
 };
 
 // ─── Notifications ────────────────────────────────────────────────────────────
@@ -187,8 +194,8 @@ export const notificationResolvers = {
 
   Notification: {
     id: (parent: any) => parent._id?.toString() ?? parent.id,
-    // ✅ DB stores 'friend_request', schema enum expects 'FRIEND_REQUEST'
-    type: (parent: any) => (parent.type ?? '').toUpperCase(),
+    // Safety net for any legacy lowercase values still in DB
+    type: (parent: any) => (parent.type ?? 'MESSAGE').toUpperCase(),
   },
 };
 
@@ -208,7 +215,7 @@ export const storyResolvers = {
         expiresAt: { $gt: new Date() },
       })
         .sort({ createdAt: -1 })
-        .populate('author', '-password')
+        .populate({ path: 'author', select: '-password', match: { _id: { $exists: true } } })
         .lean();
 
       const userId = user._id.toString();
@@ -240,7 +247,7 @@ export const storyResolvers = {
     userStories: async (_: unknown, { userId }: { userId: string }, { user }: GraphQLContext) => {
       requireAuth(user); // auth guard was missing before
       return Story.find({ author: userId, isActive: true, expiresAt: { $gt: new Date() } })
-        .populate('author', '-password')
+        .populate({ path: 'author', select: '-password', match: { _id: { $exists: true } } })
         .lean();
     },
   },

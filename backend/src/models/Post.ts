@@ -1,8 +1,9 @@
 import mongoose, { Document, Schema } from 'mongoose';
 
+// TypeScript interfaces use uppercase to match GraphQL enums
 export interface IMedia {
   url: string;
-  type: 'image' | 'video' | 'gif';
+  type: 'IMAGE' | 'VIDEO' | 'GIF';
   thumbnail?: string;
   width?: number;
   height?: number;
@@ -11,7 +12,7 @@ export interface IMedia {
 
 export interface IReaction {
   user: mongoose.Types.ObjectId;
-  type: 'like' | 'love' | 'haha' | 'wow' | 'sad' | 'angry';
+  type: 'LIKE' | 'LOVE' | 'HAHA' | 'WOW' | 'SAD' | 'ANGRY';
   createdAt: Date;
 }
 
@@ -24,7 +25,7 @@ export interface IPost extends Document {
   comments: mongoose.Types.ObjectId[];
   shares: mongoose.Types.ObjectId[];
   sharedFrom?: mongoose.Types.ObjectId;
-  visibility: 'public' | 'friends' | 'private';
+  visibility: 'PUBLIC' | 'FRIENDS' | 'PRIVATE';
   tags: mongoose.Types.ObjectId[];
   location?: string;
   feeling?: string;
@@ -36,22 +37,25 @@ export interface IPost extends Document {
   updatedAt: Date;
 }
 
+const toUpper = (v: any) => (typeof v === 'string' ? v.toUpperCase() : v);
+
 const mediaSchema = new Schema<IMedia>(
   {
     url: { type: String, required: true },
-    type: { type: String, enum: ['image', 'video', 'gif'], required: true },
+    // set: toUpper ensures 'image' → 'IMAGE' on every write
+    type: { type: String, enum: ['IMAGE', 'VIDEO', 'GIF'], required: true, set: toUpper },
     thumbnail: String,
     width: Number,
     height: Number,
     duration: Number,
   },
-  { _id: false } // ✅ no _id on sub-docs that don't need independent querying
+  { _id: false }
 );
 
 const reactionSchema = new Schema<IReaction>(
   {
     user: { type: Schema.Types.ObjectId, ref: 'User', required: true },
-    type: { type: String, enum: ['like', 'love', 'haha', 'wow', 'sad', 'angry'], required: true },
+    type: { type: String, enum: ['LIKE', 'LOVE', 'HAHA', 'WOW', 'SAD', 'ANGRY'], required: true, set: toUpper },
     createdAt: { type: Date, default: Date.now },
   },
   { _id: false }
@@ -66,13 +70,18 @@ const postSchema = new Schema<IPost>(
     comments: [{ type: Schema.Types.ObjectId, ref: 'Comment' }],
     shares: [{ type: Schema.Types.ObjectId, ref: 'User' }],
     sharedFrom: { type: Schema.Types.ObjectId, ref: 'Post' },
-    visibility: { type: String, enum: ['public', 'friends', 'private'], default: 'public' },
+    visibility: {
+      type: String,
+      enum: ['PUBLIC', 'FRIENDS', 'PRIVATE'],
+      default: 'PUBLIC',
+      set: toUpper,
+    },
     tags: [{ type: Schema.Types.ObjectId, ref: 'User' }],
     location: { type: String, maxlength: 200 },
     feeling: { type: String, maxlength: 100 },
     isPinned: { type: Boolean, default: false },
     isEdited: { type: Boolean, default: false },
-    editHistory: [{ content: { type: String }, editedAt: { type: Date } }],
+    editHistory: [{ content: String, editedAt: Date }],
     viewCount: { type: Number, default: 0, min: 0 },
   },
   {
@@ -82,12 +91,8 @@ const postSchema = new Schema<IPost>(
   }
 );
 
-// ── Indexes ────────────────────────────────────────────────────────────────────
-// Compound index — the primary feed query pattern: filter by author + sort by date
 postSchema.index({ author: 1, createdAt: -1 });
-// Public explore feed
 postSchema.index({ visibility: 1, createdAt: -1 });
-// Full-text search on post content
 postSchema.index({ content: 'text' });
 
 export const Post = mongoose.model<IPost>('Post', postSchema);

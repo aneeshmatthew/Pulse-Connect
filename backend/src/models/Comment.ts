@@ -5,7 +5,7 @@ export interface IComment extends Document {
   post: mongoose.Types.ObjectId;
   author: mongoose.Types.ObjectId;
   content: string;
-  media?: { url: string; type: 'image' | 'gif' };
+  media?: { url: string; type: string };
   reactions: { user: mongoose.Types.ObjectId; type: string; createdAt: Date }[];
   replies: mongoose.Types.ObjectId[];
   parentComment?: mongoose.Types.ObjectId;
@@ -14,18 +14,28 @@ export interface IComment extends Document {
   updatedAt: Date;
 }
 
+const toUpper = (v: any) => (typeof v === 'string' ? v.toUpperCase() : v);
+
 const commentSchema = new Schema<IComment>(
   {
     post: { type: Schema.Types.ObjectId, ref: 'Post', required: true },
     author: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     content: { type: String, required: true, maxlength: 8000 },
+    // Use type:Mixed + default null so Mongoose stores null instead of {} when no media
     media: {
-      url: String,
-      type: { type: String, enum: ['image', 'gif'] },
+      type: new mongoose.Schema(
+        {
+          url:  { type: String, required: true },
+          type: { type: String, enum: ['IMAGE', 'GIF'], set: toUpper },
+        },
+        { _id: false }
+      ),
+      default: null,
     },
     reactions: [{
+      _id: false,
       user: { type: Schema.Types.ObjectId, ref: 'User' },
-      type: { type: String, enum: ['like', 'love', 'haha', 'wow', 'sad', 'angry'] },
+      type: { type: String, enum: ['LIKE', 'LOVE', 'HAHA', 'WOW', 'SAD', 'ANGRY'], set: toUpper },
       createdAt: { type: Date, default: Date.now },
     }],
     replies: [{ type: Schema.Types.ObjectId, ref: 'Comment' }],

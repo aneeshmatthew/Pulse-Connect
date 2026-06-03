@@ -1,16 +1,8 @@
 import mongoose, { Document, Schema } from 'mongoose';
 
 export type NotificationType =
-  | 'friend_request'
-  | 'friend_accept'
-  | 'post_like'
-  | 'post_comment'
-  | 'comment_reply'
-  | 'post_share'
-  | 'post_tag'
-  | 'mention'
-  | 'story_view'
-  | 'message';
+  | 'FRIEND_REQUEST' | 'FRIEND_ACCEPT' | 'POST_LIKE' | 'POST_COMMENT'
+  | 'COMMENT_REPLY' | 'POST_SHARE' | 'POST_TAG' | 'MENTION' | 'STORY_VIEW' | 'MESSAGE';
 
 export interface INotification extends Document {
   _id: mongoose.Types.ObjectId;
@@ -18,11 +10,13 @@ export interface INotification extends Document {
   sender: mongoose.Types.ObjectId;
   type: NotificationType;
   entityId?: mongoose.Types.ObjectId;
-  entityType?: 'post' | 'comment' | 'message' | 'story';
+  entityType?: string;
   message: string;
   isRead: boolean;
   createdAt: Date;
 }
+
+const toUpper = (v: any) => (typeof v === 'string' ? v.toUpperCase() : v);
 
 const notificationSchema = new Schema<INotification>(
   {
@@ -30,8 +24,10 @@ const notificationSchema = new Schema<INotification>(
     sender: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     type: {
       type: String,
-      enum: ['friend_request', 'friend_accept', 'post_like', 'post_comment', 'comment_reply', 'post_share', 'post_tag', 'mention', 'story_view', 'message'],
+      enum: ['FRIEND_REQUEST', 'FRIEND_ACCEPT', 'POST_LIKE', 'POST_COMMENT',
+             'COMMENT_REPLY', 'POST_SHARE', 'POST_TAG', 'MENTION', 'STORY_VIEW', 'MESSAGE'],
       required: true,
+      set: toUpper,
     },
     entityId: { type: Schema.Types.ObjectId },
     entityType: { type: String, enum: ['post', 'comment', 'message', 'story'] },
