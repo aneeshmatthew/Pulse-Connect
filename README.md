@@ -149,7 +149,12 @@ FRONTEND_URL=http://localhost:5173
 ```bash
 cd backend
 npm run seed
-# Creates 6 demo users, posts, stories, and a conversation
+# 👤 Created 10 users
+# 🤝 Created 22 friendships
+# 📝 Created 49 posts
+# 💬 Created 58 comments
+# 📸 Created 10 stories
+# 💌 Created sample conversation
 # Login: demo@example.com / password123
 ```
 
