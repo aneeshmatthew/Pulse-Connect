@@ -89,11 +89,14 @@ async function bootstrap() {
 
   // ── Express middleware ─────────────────────────────────────────────────────
   const allowedOrigins = (process.env.FRONTEND_URL ?? 'http://localhost:5173').split(',').map(s => s.trim());
+  const serverOrigins = [`http://localhost:${PORT}`, `http://127.0.0.1:${PORT}`];
 
   app.use(cors({
     origin: (origin, callback) => {
       // Allow requests with no origin (mobile apps, curl, etc.)
       if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
+      // Apollo Sandbox at /graphql sends requests from the backend's own origin
+      if (isDev && serverOrigins.includes(origin)) return callback(null, true);
       callback(new Error(`CORS blocked: ${origin}`));
     },
     credentials: true,

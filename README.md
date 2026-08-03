@@ -119,6 +119,9 @@ cd socialapp
 npm install
 npm install --workspace=backend
 npm install --workspace=frontend
+
+# From root — npm install on both backend and frondend
+npm run setup
 ```
 
 ### 2. Configure Environment
@@ -155,12 +158,15 @@ npm run seed
 # 💬 Created 58 comments
 # 📸 Created 10 stories
 # 💌 Created sample conversation
-# Login: demo@example.com / password123
+# Login: demo@example.com / Password1
 ```
 
 ### 4. Start Development
 
 ```bash
+# From root — npm build both workspace
+npm run build
+
 # From root — starts both backend and frontend
 npm run dev
 
