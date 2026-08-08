@@ -88,12 +88,17 @@ async function bootstrap() {
   await apolloServer.start();
 
   // ── Express middleware ─────────────────────────────────────────────────────
-  const allowedOrigins = (process.env.FRONTEND_URL ?? 'http://localhost:5173').split(',').map(s => s.trim());
+  const allowedOrigins = (process.env.FRONTEND_URL ?? 'http://localhost:5173')
+    .split(',')
+    .map(s => s.trim());
 
   app.use(cors({
     origin: (origin, callback) => {
       // Allow requests with no origin (mobile apps, curl, etc.)
-      if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
+      if (!origin) return callback(null, true);
+      // Allow all localhost origins in development for local static serve + Vite dev.
+      if (isDev && origin.startsWith('http://localhost:')) return callback(null, true);
+      if (allowedOrigins.includes(origin)) return callback(null, true);
       callback(new Error(`CORS blocked: ${origin}`));
     },
     credentials: true,
