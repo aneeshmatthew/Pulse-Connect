@@ -1,4 +1,4 @@
-# SocialApp — System Design
+# PluseConnect — System Design
 ## Delivery Roadmap
 
 This roadmap defines the core completion milestones required to move the design into production-ready implementation.

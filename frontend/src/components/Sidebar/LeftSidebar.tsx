@@ -121,7 +121,7 @@ export function LeftSidebar() {
       {/* Footer */}
       <div className="mt-auto pt-4 px-2 text-xs text-gray-400 dark:text-gray-600 leading-relaxed">
         <p>Privacy · Terms · Advertising · Ad choices · Cookies</p>
-        <p className="mt-1">SocialApp © {new Date().getFullYear()}</p>
+        <p className="mt-1">PluseConnect © {new Date().getFullYear()}</p>
       </div>
     </aside>
   );

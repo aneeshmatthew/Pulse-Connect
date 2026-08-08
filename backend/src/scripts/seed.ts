@@ -349,7 +349,7 @@ async function seed() {
   });
 
   const msgThreads = [
-    { sender: alice._id, content: "Hey Demo! Welcome to SocialApp 👋 How's it going?",          minsAgo: 12 },
+    { sender: alice._id, content: "Hey Demo! Welcome to PluseConnect 👋 How's it going?",          minsAgo: 12 },
     { sender: demo._id,  content: "Alice! Great to be here 😊 The feed looks amazing already.",  minsAgo: 10 },
     { sender: alice._id, content: "Right?! Make sure you check out the stories, they're so fun", minsAgo: 9  },
     { sender: demo._id,  content: "Just added mine! Did you see the virtual scroll on the feed? So smooth 🔥", minsAgo: 7 },

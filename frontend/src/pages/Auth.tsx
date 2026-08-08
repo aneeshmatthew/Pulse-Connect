@@ -103,9 +103,9 @@ export function LoginPage() {
           <div className="w-16 h-16 bg-brand-500 rounded-2xl flex items-center justify-center text-white font-black text-3xl mb-6 select-none">
             S
           </div>
-          <h1 className="text-5xl font-black text-brand-500 mb-4 leading-tight">SocialApp</h1>
+          <h1 className="text-5xl font-black text-brand-500 mb-4 leading-tight">PluseConnect</h1>
           <p className="text-xl text-gray-600 dark:text-gray-400 leading-relaxed">
-            Connect with friends and the world around you on SocialApp.
+            Connect with friends and the world around you on PluseConnect.
           </p>
         </motion.div>
 
@@ -222,7 +222,7 @@ export function RegisterPage() {
       if (data?.register) {
         setAuth(data.register.token, data.register.user);
         navigate('/', { replace: true });
-        toast.success('Welcome to SocialApp! 🎉');
+        toast.success('Welcome to PluseConnect! 🎉');
       }
     } catch (err: any) {
       const msg = err?.graphQLErrors?.[0]?.message ?? 'Registration failed';

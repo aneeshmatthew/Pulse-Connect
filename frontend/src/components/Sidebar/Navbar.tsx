@@ -125,7 +125,7 @@ export function Navbar() {
             value={searchText}
             onChange={(e) => { setSearchText(e.target.value); setShowSearch(true); }}
             onFocus={() => setShowSearch(true)}
-            placeholder="Search SocialApp"
+            placeholder="Search PluseConnect"
             aria-label="Search"
             className="bg-transparent text-sm outline-none text-gray-900 dark:text-white placeholder:text-gray-400 w-full"
           />

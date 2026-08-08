@@ -1,4 +1,4 @@
-# SocialApp — Architecture & System Design
+# PluseConnect — Architecture & System Design
 
 This  document explains architecture, data model, schema, deployment, observability, testing, and backup guidance into a single, stakeholder-ready reference.
 
@@ -25,7 +25,7 @@ TABLE OF CONTENTS
 
 ## Executive Summary
 
-SocialApp is designed as a social interaction platform with a strong emphasis on content sharing, real-time messaging, and event-driven user engagement. This architecture is intended to be robust enough for early production use while remaining modular enough to support rapid feature expansion and experimentation.
+PluseConnect is designed as a social interaction platform with a strong emphasis on content sharing, real-time messaging, and event-driven user engagement. This architecture is intended to be robust enough for early production use while remaining modular enough to support rapid feature expansion and experimentation.
 
 ## Design Principles
 
