@@ -1,4 +1,4 @@
-# SocialApp — Full-Stack Facebook-Style Social Network
+# PulseConnect — Full-Stack Facebook-Style Social Network
 
 A production-ready, full-stack social media platform built with TypeScript, React, GraphQL, WebSockets, and MongoDB. Features real-time streaming, virtual scroll, and a complete Facebook-like UX.
 
