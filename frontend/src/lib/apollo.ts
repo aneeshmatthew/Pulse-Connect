@@ -12,8 +12,13 @@ import { GraphQLWsLink } from '@apollo/client/link/subscriptions';
 import { getMainDefinition } from '@apollo/client/utilities';
 import { createClient } from 'graphql-ws';
 
+const defaultGraphqlUrl = import.meta.env.VITE_GRAPHQL_URL
+  ?? (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+    ? 'http://localhost:4000/graphql'
+    : '/graphql');
+
 const httpLink = createHttpLink({
-  uri: import.meta.env.VITE_GRAPHQL_URL ?? '/graphql',
+  uri: defaultGraphqlUrl,
 });
 
 const authLink = setContext((_, { headers }) => {
@@ -37,7 +42,7 @@ const errorLink = onError(({ graphQLErrors, networkError, operation }) => {
         }
         return;
       }
-      if (process.env.NODE_ENV !== 'production') {
+      if (import.meta.env.DEV) {
         console.error(`[GraphQL error] op=${operation.operationName}: ${message}`);
       }
     });
@@ -49,7 +54,11 @@ const errorLink = onError(({ graphQLErrors, networkError, operation }) => {
 
 // Detect HTTPS → use wss://, HTTP → ws://
 const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-const wsUrl = `${wsProtocol}://${window.location.host}/graphql`;
+const defaultWsUrl = import.meta.env.VITE_WS_URL
+  ?? (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+    ? 'ws://localhost:4000/graphql'
+    : `${wsProtocol}://${window.location.host}/graphql`);
+const wsUrl = defaultWsUrl;
 
 const wsLink = new GraphQLWsLink(
   createClient({

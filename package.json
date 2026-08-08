@@ -6,12 +6,14 @@
   "scripts": {
     "setup": "npm install && npm install --workspace=backend && npm install --workspace=frontend && npm install --workspace=shared",
     "seed": "npm run seed --workspace=backend",
-    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
-    "dev:backend": "npm run dev --workspace=backend",
-    "dev:frontend": "npm run dev --workspace=frontend",
+    "start": "npm run start:all",
+    "start:backend": "npm run build --workspace=backend && npm run start --workspace=backend",
+    "start:frontend": "npx serve frontend/dist -l 5173",
+    "start:all": "concurrently \"npm run start:backend\" \"npm run start:frontend\"",
     "build": "npm run build --workspace=shared && npm run build --workspace=backend && npm run build --workspace=frontend"
   },
   "devDependencies": {
-    "concurrently": "^8.2.2"
+    "concurrently": "^8.2.2",
+    "serve": "^14.2.0"
   }
 }
