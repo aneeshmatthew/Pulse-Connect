@@ -116,9 +116,7 @@ socialapp/
 ```bash
 git clone <repo>
 cd socialapp
-npm install
-npm install --workspace=backend
-npm install --workspace=frontend
+npm run setup
 ```
 
 ### 2. Configure Environment
