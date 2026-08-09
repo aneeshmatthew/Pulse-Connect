@@ -8,6 +8,7 @@ import {
   GET_CONVERSATIONS, GET_MESSAGES, SEND_MESSAGE,
   NEW_MESSAGE_SUB, TYPING_STATUS_SUB, SET_TYPING, MARK_CONVERSATION_READ,
 } from '@/lib/graphql';
+import { subscriptionsEnabled, POLL_INTERVAL_MS } from '@/lib/apollo';
 import { Avatar } from '@/components/UI/Avatar';
 import { AppLayout } from './Home';
 import { useAuthStore } from '@/store';
@@ -27,10 +28,17 @@ export function MessagesPage() {
   const typingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isTypingRef = useRef(false);
 
-  const { data: convsData } = useQuery(GET_CONVERSATIONS, { skip: !user });
+  const { data: convsData } = useQuery(GET_CONVERSATIONS, {
+    skip: !user,
+    pollInterval: subscriptionsEnabled ? 0 : POLL_INTERVAL_MS.conversationsList,
+  });
   const { data: msgsData } = useQuery(GET_MESSAGES, {
     variables: { conversationId: activeConvId, limit: 50 },
     skip: !activeConvId,
+    // Fallback for deployments without a WebSocket-capable backend (e.g.
+    // Vercel): re-poll for new messages every few seconds. Safe to merge —
+    // `messages` is cached per-conversationId and dedupes by ref.
+    pollInterval: subscriptionsEnabled ? 0 : POLL_INTERVAL_MS.chatMessages,
   });
 
   const [sendMessage, { loading: sending }] = useMutation(SEND_MESSAGE, {
@@ -54,7 +62,7 @@ export function MessagesPage() {
 
   useSubscription(NEW_MESSAGE_SUB, {
     variables: { conversationId: activeConvId! },
-    skip: !activeConvId,
+    skip: !activeConvId || !subscriptionsEnabled,
     onData: ({ client, data }) => {
       const newMsg = data.data?.newMessage;
       if (!newMsg || !activeConvId) return;
@@ -72,7 +80,7 @@ export function MessagesPage() {
 
   useSubscription(TYPING_STATUS_SUB, {
     variables: { conversationId: activeConvId! },
-    skip: !activeConvId,
+    skip: !activeConvId || !subscriptionsEnabled,
     onData: ({ data }) => {
       const s = data.data?.typingStatus;
       if (s && s.userId !== user?.id) {

@@ -10,6 +10,7 @@ import {
   GET_NOTIFICATIONS, SEARCH_USERS,
   NEW_NOTIFICATION_SUB, MARK_ALL_NOTIFICATIONS_READ,
 } from '@/lib/graphql';
+import { subscriptionsEnabled } from '@/lib/apollo';
 import { Avatar } from '@/components/UI/Avatar';
 import { useAuthStore, useUIStore, useNotificationStore } from '@/store';
 import { timeAgo, cn } from '@/utils';
@@ -52,8 +53,12 @@ export function Navbar() {
     refetchQueries: [GET_NOTIFICATIONS],
   });
 
+  // Not polling this for now (out of current scope — Feed + Chat only).
+  // GET_NOTIFICATIONS above still refreshes on its own triggers (mount,
+  // refetchQueries after markAllRead), so counts aren't permanently stale,
+  // just not push-live.
   useSubscription(NEW_NOTIFICATION_SUB, {
-    skip: !user,
+    skip: !user || !subscriptionsEnabled,
     onData: ({ data }) => {
       if (data.data?.newNotification) incrementUnread();
     },
