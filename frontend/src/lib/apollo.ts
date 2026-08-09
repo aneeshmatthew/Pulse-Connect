@@ -12,10 +12,21 @@ import { GraphQLWsLink } from '@apollo/client/link/subscriptions';
 import { getMainDefinition } from '@apollo/client/utilities';
 import { createClient } from 'graphql-ws';
 
-const defaultGraphqlUrl = import.meta.env.VITE_GRAPHQL_URL
-  ?? (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-    ? 'http://localhost:4000/graphql'
-    : '/graphql');
+// Vite loads .env / .env.local in EVERY mode, including `npm run dev` — so
+// if VITE_GRAPHQL_URL is set anywhere for production, it would previously
+// also leak into local dev and point your dev server at the deployed
+// backend (which CORS-blocks it, since only the deployed frontend origin
+// is allowlisted there). `import.meta.env.DEV` is only true while running
+// the Vite dev server, so gating on it makes `npm run dev` immune to
+// whatever is in VITE_GRAPHQL_URL / VITE_WS_URL — it always talks to your
+// local backend. Vercel's build runs `vite build` (DEV=false), so the
+// deployed frontend still picks up VITE_GRAPHQL_URL as intended.
+const isDevServer = import.meta.env.DEV;
+const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+
+const defaultGraphqlUrl = isDevServer
+  ? 'http://localhost:4000/graphql'
+  : (import.meta.env.VITE_GRAPHQL_URL ?? (isLocalhost ? 'http://localhost:4000/graphql' : '/api/graphql'));
 
 const httpLink = createHttpLink({
   uri: defaultGraphqlUrl,
@@ -52,37 +63,57 @@ const errorLink = onError(({ graphQLErrors, networkError, operation }) => {
   }
 });
 
+// Vercel Node.js serverless functions can't hold a persistent WebSocket
+// connection open, so a backend deployed to Vercel (see backend/api/) can
+// only serve GraphQL over HTTP — subscriptions won't work against it.
+// Default to disabled in any build without an explicit VITE_WS_URL / on
+// localhost; set VITE_ENABLE_SUBSCRIPTIONS=true and VITE_WS_URL if you
+// deploy the WebSocket server elsewhere (see DEPLOYMENT.md).
+export const subscriptionsEnabled = import.meta.env.VITE_ENABLE_SUBSCRIPTIONS === 'true' || isDevServer || isLocalhost;
+
+// Fallback polling cadence used by Feed/Chat when subscriptionsEnabled is
+// false — a cheap stand-in for push updates that costs nothing beyond
+// normal HTTP requests (no WebSocket host required). Chat polls fastest
+// since messages are the most time-sensitive; the feed "new posts" check
+// and conversation list (unread badges) can be a bit more relaxed.
+export const POLL_INTERVAL_MS = {
+  chatMessages: 3000,
+  conversationsList: 8000,
+  feedNewPostsCheck: 12000,
+} as const;
+
 // Detect HTTPS → use wss://, HTTP → ws://
 const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-const defaultWsUrl = import.meta.env.VITE_WS_URL
-  ?? (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-    ? 'ws://localhost:4000/graphql'
-    : `${wsProtocol}://${window.location.host}/graphql`);
+const defaultWsUrl = isDevServer
+  ? 'ws://localhost:4000/graphql'
+  : (import.meta.env.VITE_WS_URL ?? (isLocalhost ? 'ws://localhost:4000/graphql' : `${wsProtocol}://${window.location.host}/graphql`));
 const wsUrl = defaultWsUrl;
 
-const wsLink = new GraphQLWsLink(
-  createClient({
-    url: wsUrl,
-    connectionParams: () => {
-      const token = localStorage.getItem('token');
-      return token ? { authorization: `Bearer ${token}` } : {};
-    },
-    retryAttempts: 10,
-    shouldRetry: () => true,
-    on: {
-      error: (err) => console.warn('[WS error]', err),
-    },
-  })
-);
+const httpChain = from([errorLink, authLink, httpLink]);
 
-const splitLink = split(
-  ({ query }) => {
-    const def = getMainDefinition(query);
-    return def.kind === 'OperationDefinition' && def.operation === 'subscription';
-  },
-  wsLink,
-  from([errorLink, authLink, httpLink])
-);
+const activeLink: ApolloLink = subscriptionsEnabled
+  ? split(
+      ({ query }) => {
+        const def = getMainDefinition(query);
+        return def.kind === 'OperationDefinition' && def.operation === 'subscription';
+      },
+      new GraphQLWsLink(
+        createClient({
+          url: wsUrl,
+          connectionParams: () => {
+            const token = localStorage.getItem('token');
+            return token ? { authorization: `Bearer ${token}` } : {};
+          },
+          retryAttempts: 10,
+          shouldRetry: () => true,
+          on: {
+            error: (err) => console.warn('[WS error]', err),
+          },
+        })
+      ),
+      httpChain
+    )
+  : httpChain;
 
 export const apolloCache = new InMemoryCache({
   typePolicies: {
@@ -125,7 +156,7 @@ export const apolloCache = new InMemoryCache({
 });
 
 export const client = new ApolloClient({
-  link: splitLink,
+  link: activeLink,
   cache: apolloCache,
   defaultOptions: {
     watchQuery: { fetchPolicy: 'cache-and-network', errorPolicy: 'all' },

@@ -4,16 +4,15 @@
   "private": true,
   "workspaces": ["backend", "frontend", "shared"],
   "scripts": {
-    "setup": "npm install && npm install --workspace=backend && npm install --workspace=frontend && npm install --workspace=shared",
+    "setup": "npm install && npm install --workspace=backend && npm install --workspace=frontend",
     "seed": "npm run seed --workspace=backend",
-    "start": "npm run start:all",
-    "start:backend": "npm run build --workspace=backend && npm run start --workspace=backend",
-    "start:frontend": "npx serve frontend/dist -l 5173",
-    "start:all": "concurrently \"npm run start:backend\" \"npm run start:frontend\"",
-    "build": "npm run build --workspace=shared && npm run build --workspace=backend && npm run build --workspace=frontend"
+    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "dev:backend": "npm run dev --workspace=backend",
+    "dev:frontend": "npm run dev --workspace=frontend",
+    "build": "npm run build --workspace=backend && npm run build --workspace=frontend",
+    "vercel-build": "node -e \"console.error('This repo deploys to Vercel as TWO separate projects (Root Directory = backend, and Root Directory = frontend) — see DEPLOYMENT.md. Set your Vercel project\\'s Root Directory instead of deploying from the repo root.'); process.exit(1)\""
   },
   "devDependencies": {
-    "concurrently": "^8.2.2",
-    "serve": "^14.2.0"
+    "concurrently": "^8.2.2"
   }
 }

@@ -8,6 +8,7 @@ import {
   NEW_MESSAGE_SUB, TYPING_STATUS_SUB,
   MARK_CONVERSATION_READ, GET_CONVERSATIONS,
 } from '@/lib/graphql';
+import { subscriptionsEnabled, POLL_INTERVAL_MS } from '@/lib/apollo';
 import { Avatar } from '@/components/UI/Avatar';
 import { useAuthStore, useUIStore } from '@/store';
 import { formatMessageTime, cn } from '@/utils';
@@ -107,6 +108,10 @@ const ChatWindow = memo(function ChatWindow({ conversationId, participant }: Cha
   const { data } = useQuery(GET_MESSAGES, {
     variables: { conversationId, limit: 40 },
     skip: !conversationId,
+    // Fallback for deployments without a WebSocket-capable backend (e.g.
+    // Vercel): re-poll for new messages every few seconds. Safe to merge —
+    // `messages` is cached per-conversationId and dedupes by ref.
+    pollInterval: subscriptionsEnabled ? 0 : POLL_INTERVAL_MS.chatMessages,
   });
 
   const [sendMessage, { loading: sending }] = useMutation(SEND_MESSAGE, {
@@ -130,6 +135,7 @@ const ChatWindow = memo(function ChatWindow({ conversationId, participant }: Cha
 
   useSubscription(NEW_MESSAGE_SUB, {
     variables: { conversationId },
+    skip: !subscriptionsEnabled,
     onData: ({ client, data }) => {
       const newMsg = data.data?.newMessage;
       if (!newMsg) return;
@@ -148,8 +154,12 @@ const ChatWindow = memo(function ChatWindow({ conversationId, participant }: Cha
     },
   });
 
+  // Typing indicator has no polling equivalent (polling for it would mean
+  // a request every second or two just to catch a ~1s-long event) — it's
+  // simply unavailable without a WebSocket-capable backend.
   useSubscription(TYPING_STATUS_SUB, {
     variables: { conversationId },
+    skip: !subscriptionsEnabled,
     onData: ({ data }) => {
       const s = data.data?.typingStatus;
       if (s && s.userId !== user?.id) {
@@ -347,6 +357,7 @@ export function ChatPanel() {
 
   const { data } = useQuery(GET_CONVERSATIONS, {
     skip: !chatOpen || !user,
+    pollInterval: subscriptionsEnabled ? 0 : POLL_INTERVAL_MS.conversationsList,
   });
 
   if (!chatOpen || !activeChatId || !user) return null;

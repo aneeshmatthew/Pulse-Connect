@@ -4,6 +4,7 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import { motion, AnimatePresence } from 'framer-motion';
 import { RefreshCw } from 'lucide-react';
 import { GET_FEED, NEW_POST_SUB } from '@/lib/graphql';
+import { subscriptionsEnabled, POLL_INTERVAL_MS } from '@/lib/apollo';
 import { PostCard } from '@/components/Post/PostCard';
 import { CreatePost } from '@/components/Post/CreatePost';
 import { StoriesBar } from '@/components/Stories/StoriesBar';
@@ -27,13 +28,37 @@ export function Feed() {
     fetchPolicy: 'cache-and-network',
   });
 
-  // New-post subscription — banner instead of auto-insert to avoid layout jumps
+  // New-post subscription — banner instead of auto-insert to avoid layout jumps.
+  // Only live where a WebSocket-capable backend is configured (see apollo.ts).
   useSubscription(NEW_POST_SUB, {
-    skip: !isAuthenticated,
+    skip: !isAuthenticated || !subscriptionsEnabled,
     onData: () => setHasNewPosts(true),
   });
 
   const posts: any[] = data?.feed?.posts ?? [];
+  const latestPostId: string | undefined = posts[0]?.id;
+
+  // Polling fallback for deployments without subscriptions (e.g. Vercel):
+  // periodically peek at the newest post and flip the same "new posts"
+  // banner the subscription would have triggered. fetchPolicy 'no-cache'
+  // is important here — the `feed` field is cached with keyArgs: false
+  // (all pages share one cache entry), so a cached peek would silently
+  // merge into and reorder the real feed data the virtualizer is using.
+  const { data: peekData } = useQuery(GET_FEED, {
+    variables: { limit: 1 },
+    skip: !isAuthenticated || subscriptionsEnabled,
+    pollInterval: subscriptionsEnabled ? 0 : POLL_INTERVAL_MS.feedNewPostsCheck,
+    fetchPolicy: 'no-cache',
+    notifyOnNetworkStatusChange: false,
+  });
+
+  useEffect(() => {
+    if (subscriptionsEnabled || !latestPostId) return;
+    const newestPolledId = peekData?.feed?.posts?.[0]?.id;
+    if (newestPolledId && newestPolledId !== latestPostId) {
+      setHasNewPosts(true);
+    }
+  }, [peekData, latestPostId]);
   const hasMore: boolean = data?.feed?.hasMore ?? false;
   const nextCursor: string | null = data?.feed?.nextCursor ?? null;
   // Show skeletons on first load (no posts yet), not on subsequent fetches
