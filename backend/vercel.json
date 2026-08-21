@@ -1,6 +1,5 @@
 {
   "version": 2,
-  "buildCommand": "echo 'No project-wide build needed — Vercel compiles each function in /api individually'",
   "rewrites": [
     { "source": "/graphql", "destination": "/api/graphql" },
     { "source": "/health", "destination": "/api/health" }
