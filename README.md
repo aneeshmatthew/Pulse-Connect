@@ -256,6 +256,39 @@ subscription { newNotification { type message sender { fullName } } }
 
 Running log of gaps found during review, kept up to date as issues are found and fixed. Newest entries at the top.
 
+### 2026-08-22 — Todo list (working through one at a time)
+
+- [x] `Post.tags` had no field resolver and was silently returned as `null` outside the single-post query — same class of bug as the `User.friends` fix. Fixed.
+- [x] Six nav destinations (Friends, Watch, Marketplace, Saved, Events, Settings) had no matching routes — clicking silently bounced back to Home. Added placeholder pages so navigation no longer fails silently.
+- [ ] Floating chat popup (`ChatPanel`/`ChatWindow`) reported as having no way to close it. **Deferred at the user's request** — see notes below; needs a repro before diagnosing further, since the code as written does have a close button wired to `closeChat()`.
+- [ ] Build real Friends / Watch / Marketplace / Saved / Events / Settings pages to replace the "Coming Soon" placeholders (no backend schema exists yet for any of these either — this is new feature work, not a bug fix).
+
+### 2026-08-22 (2) — `Post.tags` — same "unpopulated list, no field resolver" bug as `User.friends`
+
+**Symptom:** Not yet user-visible — caught during a proactive gap audit, not reported by the user. `tags: [User!]` on `Post` had no GraphQL field resolver, and only the single-post `post(id)` query populated it (`.populate('tags', ...)`); the `feed`, `exploreFeed`, and `userPosts` queries all left it as raw ObjectIds. Because `User!` list elements are non-nullable, this would have silently nulled out the whole `tags` array anywhere else it was queried — identical failure mode to the `User.friends` bug fixed on 2026-08-21. It hadn't surfaced yet only because the frontend's feed fragment doesn't currently request `tags` at all.
+
+**Fix:** added a `Post.tags` field resolver (`backend/src/graphql/resolvers/post.resolvers.ts`) that batch-loads via the existing `userLoader` DataLoader — same pattern as `User.friends` and `Reaction.user` — so it now resolves correctly no matter which query returned the post, instead of depending on every query author remembering to add `.populate('tags')`.
+
+**Note — related but out of scope:** the frontend has no UI to actually tag people when creating a post, and `GET_POST` (the query that already requests `tags`) isn't used anywhere — there's no single-post detail page/route. Fixing the resolver closes the backend correctness gap; building tagging UI and a post detail page is separate feature work.
+
+**Files touched:** `backend/src/graphql/resolvers/post.resolvers.ts`
+
+**Status:** ✅ Fixed, typechecked clean.
+
+### 2026-08-22 (1) — Friends / Watch / Marketplace / Saved / Events / Settings nav links went nowhere
+
+**Symptom (found during gap audit, confirmed against the UI):** Both the top navbar (`Navbar.tsx`'s `NAV_TABS`) and left sidebar (`LeftSidebar.tsx`'s `NAV_ITEMS`) link to `/friends`, `/watch`, `/marketplace`, `/saved`, `/events`, and `/settings`. None of these routes exist in `App.tsx`, which only defines `/`, `/profile/:username`, and `/messages` plus a catch-all `<Route path="*" element={<Navigate to="/" replace />} />`. Clicking any of the six silently redirected back to Home — no 404, no explanation, just an unexplained bounce that looks like a bug even though technically "nothing crashed."
+
+**Root cause:** these are genuinely unbuilt features, not just a missing route wire-up — there's no backend GraphQL schema support for marketplace listings, videos, events, or saved posts either. The nav was built ahead of the features it points to.
+
+**Fix (interim):** added `frontend/src/pages/ComingSoon.tsx`, a reusable placeholder page (keeps the app shell/nav via `AppLayout`, shows an icon + short description + a "Back to Home" button), and routed all six paths to it in `App.tsx`. This stops the silent failure — visiting any of these now clearly tells the person the feature isn't built yet instead of looking broken.
+
+**Not done, and intentionally so:** actually building these six features (schema, resolvers, pages) is substantial new feature work, not a bug fix — logged as its own open item below rather than attempted here.
+
+**Files touched:** `frontend/src/pages/ComingSoon.tsx` (new), `frontend/src/App.tsx`
+
+**Status:** ✅ Interim fix (placeholder pages) done and typechecked clean. Real features remain unbuilt — see "Open items" below.
+
 ### 2026-08-21 (4) — Media upload moved off local disk to Cloudinary (production-ready on Vercel)
 
 **Context:** Entry (2) below shipped a working Photo/Video upload pipeline, but explicitly flagged it as **not production-ready** — it used `multer` to write files to this server's local disk, which doesn't persist on Vercel serverless (ephemeral, per-invocation filesystem, no shared volume). This entry replaces that implementation with real cloud object storage, closing that gap.
@@ -304,9 +337,11 @@ Running log of gaps found during review, kept up to date as issues are found and
 **Status:** ✅ Notification accept/decline fixed and typechecked. Photo/Video upload: see entry (4) for the production-ready version.
 
 ### Open items to verify next
+- [ ] **Chat popup close button** — user reports the floating chat window (`ChatPanel`/`ChatWindow`) has no way to close it. Deferred at their request. Note for whoever picks this up: the code as currently written *does* have a close button (`aria-label="Close chat"`, wired to `closeChat()` in the UI store, which unmounts the panel) — so this needs a fresh repro/screenshot before diagnosing further, since the described symptom doesn't match what's in the code. Possibilities to check: a stale build, a CSS z-index/overflow issue hiding the button, or a different chat entry point than `ChatPanel.tsx`.
+- [ ] Build real Friends / Watch / Marketplace / Saved / Events / Settings pages — currently "Coming Soon" placeholders (see 2026-08-22 (1)). No backend schema exists yet for marketplace listings, videos, events, or saved posts, so this is new feature work each time, not a quick fix.
 - [ ] Notification click-through (tapping a non-friend-request notification, e.g. `POST_LIKE`/`POST_COMMENT`, to navigate to the relevant post) is still not implemented — only the friend-request action buttons were added.
-- [ ] Audit other non-nullable `User!`/`Post!` list fields (e.g. `Post.reactions[].user`, `Comment.author`) for the same "lean doc without a field resolver" pattern — the friends bug suggests this may not be isolated.
-- [ ] No automated test currently guards against a populated-list field silently returning `null`; consider a resolver-level integration test for `GET_USER` with a seeded user that has friends.
+- [x] ~~Audit other non-nullable `User!`/`Post!` list fields for the same "lean doc without a field resolver" pattern~~ — done for `Post.tags` (2026-08-22 (2)); `Reaction.user`, `Comment.author`, and `Conversation.participants` were checked and are already populated/resolved correctly everywhere they're used.
+- [ ] No automated test currently guards against a populated-list field silently returning `null`; consider a resolver-level integration test for `GET_USER` with a seeded user that has friends, and one for `feed`/`post` with a seeded post that has tags.
 - [ ] Avatar component has no visual regression/story coverage, so size-variant mismatches like this aren't caught until manual QA.
 - [ ] Uploaded media currently has no server-side validation beyond what Cloudinary's client SDK enforces (file type/size); consider an `eager` transformation or moderation add-on if user-generated content moderation becomes a concern.
 

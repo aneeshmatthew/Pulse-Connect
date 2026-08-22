@@ -289,6 +289,26 @@ export const postResolvers = {
         .limit(Math.min(limit, 20))
         .populate({ path: 'author', select: '-password', match: { _id: { $exists: true } } })
         .lean(),
+
+    // `parent.tags` is only ever populated by the single `post(id)` query
+    // (via `.populate('tags', ...)`) — feed/exploreFeed/userPosts all leave
+    // it as raw ObjectIds. Rather than relying on every query author to
+    // remember to add `.populate('tags')` (the same mistake that caused the
+    // `User.friends` bug), resolve it here via DataLoader so it's correct
+    // regardless of which query returned the post. Batch-loads via the
+    // shared userLoader, same pattern as User.friends and Reaction.user.
+    tags: async (parent: any, _: unknown, { loaders }: GraphQLContext) => {
+      if (!parent.tags?.length) return [];
+      // Already populated objects (e.g. from the `post(id)` query's
+      // `.populate('tags', ...)`) — pass through without a wasted loader call.
+      if (typeof parent.tags[0] === 'object' && parent.tags[0]?.firstName) {
+        return parent.tags;
+      }
+      const users = await loaders.userLoader.loadMany(
+        parent.tags.map((id: any) => id.toString())
+      );
+      return users.filter((u: any) => u && !(u instanceof Error));
+    },
   },
 
   // ── Shared type resolvers ─────────────────────────────────────────────────
