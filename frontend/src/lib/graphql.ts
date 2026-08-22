@@ -257,6 +257,12 @@ export const ACCEPT_FRIEND_REQUEST = gql`
   }
 `;
 
+export const DECLINE_FRIEND_REQUEST = gql`
+  mutation DeclineFriendRequest($userId: ID!) {
+    declineFriendRequest(userId: $userId)
+  }
+`;
+
 export const SEND_MESSAGE = gql`
   mutation SendMessage($input: SendMessageInput!) {
     sendMessage(input: $input) { ...MessageFields }

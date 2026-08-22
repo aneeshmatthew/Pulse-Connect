@@ -111,6 +111,19 @@ export const authResolvers = {
     fullName: (parent: any) => `${parent.firstName} ${parent.lastName}`,
     friendsCount: (parent: any) => parent.friends?.length ?? 0,
 
+    // `parent.friends` is just an array of ObjectIds on the raw Mongo doc.
+    // Without this resolver, GraphQL tries to resolve each raw ObjectId as a
+    // full User, fails on non-nullable fields (username, firstName, ...),
+    // and nulls out the whole list — which is why the UI showed a correct
+    // friendsCount but an empty friends list. Batch-load the real docs.
+    friends: async (parent: any, _: unknown, { loaders }: GraphQLContext) => {
+      if (!parent.friends?.length) return [];
+      const users = await loaders.userLoader.loadMany(
+        parent.friends.map((id: any) => id.toString())
+      );
+      return users.filter((u: any) => u && !(u instanceof Error));
+    },
+
     // Use DataLoader to batch-load post counts — eliminates N+1
     postsCount: async (parent: any, _: unknown, { loaders }: GraphQLContext) => {
       // DataLoader doesn't have a count loader, so use a fast countDocuments

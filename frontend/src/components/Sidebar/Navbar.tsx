@@ -4,16 +4,18 @@ import { useQuery, useLazyQuery, useSubscription, useMutation } from '@apollo/cl
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Search, Home, Users, Store, PlaySquare,
-  Bell, MessageCircle, ChevronDown, X,
+  Bell, MessageCircle, ChevronDown, X, Check, UserX,
 } from 'lucide-react';
 import {
   GET_NOTIFICATIONS, SEARCH_USERS,
   NEW_NOTIFICATION_SUB, MARK_ALL_NOTIFICATIONS_READ,
+  ACCEPT_FRIEND_REQUEST, DECLINE_FRIEND_REQUEST,
 } from '@/lib/graphql';
 import { subscriptionsEnabled } from '@/lib/apollo';
 import { Avatar } from '@/components/UI/Avatar';
 import { useAuthStore, useUIStore, useNotificationStore } from '@/store';
 import { timeAgo, cn } from '@/utils';
+import toast from 'react-hot-toast';
 
 const NAV_TABS = [
   { to: '/',          icon: Home,       label: 'Home' },
@@ -52,6 +54,45 @@ export function Navbar() {
   const [markAllRead] = useMutation(MARK_ALL_NOTIFICATIONS_READ, {
     refetchQueries: [GET_NOTIFICATIONS],
   });
+
+  // Friend requests actioned from the notification dropdown. GET_NOTIFICATIONS
+  // is refetched after each action so the badge/list stay in sync, but we also
+  // track handled ids locally so the button swaps to a status instantly
+  // instead of waiting on the refetch round-trip.
+  const [handledRequests, setHandledRequests] = useState<Record<string, 'accepted' | 'declined'>>({});
+  const [actioningId, setActioningId] = useState<string | null>(null);
+
+  const [acceptFriendRequest] = useMutation(ACCEPT_FRIEND_REQUEST, {
+    refetchQueries: [GET_NOTIFICATIONS],
+  });
+  const [declineFriendRequest] = useMutation(DECLINE_FRIEND_REQUEST, {
+    refetchQueries: [GET_NOTIFICATIONS],
+  });
+
+  const handleAcceptRequest = useCallback(async (notifId: string, senderId: string) => {
+    setActioningId(notifId);
+    try {
+      await acceptFriendRequest({ variables: { userId: senderId } });
+      setHandledRequests((prev) => ({ ...prev, [notifId]: 'accepted' }));
+      toast.success('Friend request accepted! 🎉');
+    } catch (err: any) {
+      toast.error(err?.graphQLErrors?.[0]?.message ?? 'Failed to accept request');
+    } finally {
+      setActioningId(null);
+    }
+  }, [acceptFriendRequest]);
+
+  const handleDeclineRequest = useCallback(async (notifId: string, senderId: string) => {
+    setActioningId(notifId);
+    try {
+      await declineFriendRequest({ variables: { userId: senderId } });
+      setHandledRequests((prev) => ({ ...prev, [notifId]: 'declined' }));
+    } catch (err: any) {
+      toast.error(err?.graphQLErrors?.[0]?.message ?? 'Failed to decline request');
+    } finally {
+      setActioningId(null);
+    }
+  }, [declineFriendRequest]);
 
   // Not polling this for now (out of current scope — Feed + Chat only).
   // GET_NOTIFICATIONS above still refreshes on its own triggers (mount,
@@ -269,29 +310,63 @@ export function Navbar() {
                   {(notifsData?.notifications ?? []).length === 0 ? (
                     <li className="p-8 text-center text-gray-400">No notifications yet</li>
                   ) : (
-                    (notifsData?.notifications ?? []).map((n: any) => (
-                      <li
-                        key={n.id}
-                        className={cn(
-                          'flex items-start gap-3 px-4 py-3 hover:bg-gray-50 dark:hover:bg-surface-dark-3 cursor-pointer transition-colors',
-                          !n.isRead && 'bg-blue-50/60 dark:bg-blue-900/10'
-                        )}
-                      >
-                        <div className="relative flex-shrink-0">
-                          <Avatar src={n.sender.avatar} name={n.sender.fullName} size="md" />
-                          <span className="absolute -bottom-1 -right-1 text-xs">
-                            {NOTIF_ICONS[n.type] ?? '🔔'}
-                          </span>
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm text-gray-900 dark:text-gray-100 leading-snug">{n.message}</p>
-                          <p className="text-xs text-brand-500 mt-0.5">{timeAgo(n.createdAt)}</p>
-                        </div>
-                        {!n.isRead && (
-                          <div className="w-2.5 h-2.5 rounded-full bg-brand-500 flex-shrink-0 mt-2" />
-                        )}
-                      </li>
-                    ))
+                    (notifsData?.notifications ?? []).map((n: any) => {
+                      const isFriendReq = n.type === 'FRIEND_REQUEST';
+                      const handled = handledRequests[n.id];
+                      const isActioning = actioningId === n.id;
+                      return (
+                        <li
+                          key={n.id}
+                          className={cn(
+                            'flex items-start gap-3 px-4 py-3 hover:bg-gray-50 dark:hover:bg-surface-dark-3 transition-colors',
+                            !n.isRead && 'bg-blue-50/60 dark:bg-blue-900/10'
+                          )}
+                        >
+                          <div className="relative flex-shrink-0">
+                            <Avatar src={n.sender.avatar} name={n.sender.fullName} size="md" />
+                            <span className="absolute -bottom-1 -right-1 text-xs">
+                              {NOTIF_ICONS[n.type] ?? '🔔'}
+                            </span>
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm text-gray-900 dark:text-gray-100 leading-snug">{n.message}</p>
+                            <p className="text-xs text-brand-500 mt-0.5">{timeAgo(n.createdAt)}</p>
+
+                            {isFriendReq && (
+                              <div className="mt-2">
+                                {handled === 'accepted' ? (
+                                  <span className="inline-flex items-center gap-1 text-xs font-medium text-green-600 dark:text-green-400">
+                                    <Check size={13} /> Friend request accepted
+                                  </span>
+                                ) : handled === 'declined' ? (
+                                  <span className="text-xs font-medium text-gray-400">Request declined</span>
+                                ) : (
+                                  <div className="flex items-center gap-2">
+                                    <button
+                                      onClick={(e) => { e.stopPropagation(); handleAcceptRequest(n.id, n.sender.id); }}
+                                      disabled={isActioning}
+                                      className="flex items-center gap-1 px-3 py-1.5 bg-brand-500 hover:bg-brand-600 disabled:opacity-50 text-white text-xs font-semibold rounded-lg transition-colors"
+                                    >
+                                      <Check size={13} /> Confirm
+                                    </button>
+                                    <button
+                                      onClick={(e) => { e.stopPropagation(); handleDeclineRequest(n.id, n.sender.id); }}
+                                      disabled={isActioning}
+                                      className="flex items-center gap-1 px-3 py-1.5 bg-gray-100 dark:bg-surface-dark-3 hover:bg-gray-200 dark:hover:bg-gray-600 disabled:opacity-50 text-gray-700 dark:text-gray-200 text-xs font-semibold rounded-lg transition-colors"
+                                    >
+                                      <UserX size={13} /> Delete
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                          {!n.isRead && (
+                            <div className="w-2.5 h-2.5 rounded-full bg-brand-500 flex-shrink-0 mt-2" />
+                          )}
+                        </li>
+                      );
+                    })
                   )}
                 </ul>
               </motion.div>

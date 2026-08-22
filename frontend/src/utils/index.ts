@@ -38,6 +38,52 @@ export function formatDate(date: string | Date | null | undefined): string {
   }
 }
 
+// ── Media upload ──────────────────────────────────────────────────────────
+// Uploads a file to the backend's REST /api/upload route (see
+// backend/src/routes/upload.ts) and returns the stored URL + media type
+// ready to hand to the createPost/createStory GraphQL mutations.
+//
+// NOTE: this REST endpoint uses local disk storage, which only works
+// against the standalone dev/self-hosted backend — it will not persist
+// files on the Vercel serverless deployment. See the README's "Known Gaps"
+// section for what production needs instead (S3/Cloudinary/etc.).
+export interface UploadedMedia {
+  url: string;
+  type: 'IMAGE' | 'VIDEO' | 'GIF';
+  filename: string;
+  size: number;
+}
+
+function apiBaseUrl(): string {
+  // Mirror the derivation in lib/apollo.ts so uploads always hit the same
+  // backend the GraphQL client is configured for.
+  const isDevServer = import.meta.env.DEV;
+  const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+  const graphqlUrl = isDevServer
+    ? 'http://localhost:4000/graphql'
+    : (import.meta.env.VITE_GRAPHQL_URL ?? (isLocalhost ? 'http://localhost:4000/graphql' : '/api/graphql'));
+  return graphqlUrl.replace(/\/graphql$/, '');
+}
+
+export async function uploadMedia(file: File): Promise<UploadedMedia> {
+  const token = localStorage.getItem('token');
+  const formData = new FormData();
+  formData.append('file', file);
+
+  const res = await fetch(`${apiBaseUrl()}/api/upload`, {
+    method: 'POST',
+    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    body: formData,
+  });
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error ?? `Upload failed (${res.status})`);
+  }
+
+  return res.json();
+}
+
 // ── Reactions ─────────────────────────────────────────────────────────────────
 
 export const REACTION_EMOJIS: Record<string, string> = {

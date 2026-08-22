@@ -5,7 +5,7 @@ import { Image, Smile, MapPin, X, Globe, Users, Lock, Loader2 } from 'lucide-rea
 import { CREATE_POST, GET_FEED } from '@/lib/graphql';
 import { Avatar } from '@/components/UI/Avatar';
 import { useAuthStore } from '@/store';
-import { cn } from '@/utils';
+import { cn, uploadMedia, type UploadedMedia } from '@/utils';
 import toast from 'react-hot-toast';
 
 const VISIBILITY_OPTIONS = [
@@ -19,6 +19,18 @@ const FEELINGS = [
   '🥳 celebrating', '😴 tired', '💪 motivated', '🙏 grateful',
 ];
 
+const MAX_ATTACHMENTS = 4;
+const MAX_FILE_SIZE_MB = 25;
+
+interface PendingMedia {
+  id: string;
+  file: File;
+  previewUrl: string;
+  uploading: boolean;
+  error: string | null;
+  uploaded: UploadedMedia | null;
+}
+
 export function CreatePost() {
   const { user } = useAuthStore();
   const [expanded, setExpanded] = useState(false);
@@ -28,7 +40,9 @@ export function CreatePost() {
   const [location, setLocation] = useState('');
   const [showVisibility, setShowVisibility] = useState(false);
   const [showFeelings, setShowFeelings] = useState(false);
+  const [pendingMedia, setPendingMedia] = useState<PendingMedia[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [createPost, { loading }] = useMutation(CREATE_POST, {
     update(cache, { data }) {
@@ -64,10 +78,62 @@ export function CreatePost() {
     setExpanded(false);
     setShowFeelings(false);
     setShowVisibility(false);
+    pendingMedia.forEach((m) => URL.revokeObjectURL(m.previewUrl));
+    setPendingMedia([]);
+  }, [pendingMedia]);
+
+  const handleFilesSelected = useCallback((files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    const remainingSlots = MAX_ATTACHMENTS - pendingMedia.length;
+    if (remainingSlots <= 0) {
+      toast.error(`You can attach up to ${MAX_ATTACHMENTS} files per post`);
+      return;
+    }
+
+    const selected = Array.from(files).slice(0, remainingSlots);
+    if (!expanded) setExpanded(true);
+
+    for (const file of selected) {
+      if (!file.type.startsWith('image/') && !file.type.startsWith('video/')) {
+        toast.error(`${file.name}: only images and videos are supported`);
+        continue;
+      }
+      if (file.size > MAX_FILE_SIZE_MB * 1024 * 1024) {
+        toast.error(`${file.name}: must be under ${MAX_FILE_SIZE_MB}MB`);
+        continue;
+      }
+
+      const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const previewUrl = URL.createObjectURL(file);
+      setPendingMedia((prev) => [...prev, { id, file, previewUrl, uploading: true, error: null, uploaded: null }]);
+
+      uploadMedia(file)
+        .then((uploaded) => {
+          setPendingMedia((prev) => prev.map((m) => (m.id === id ? { ...m, uploading: false, uploaded } : m)));
+        })
+        .catch((err: Error) => {
+          setPendingMedia((prev) => prev.map((m) => (m.id === id ? { ...m, uploading: false, error: err.message } : m)));
+          toast.error(`${file.name}: ${err.message}`);
+        });
+    }
+  }, [expanded, pendingMedia.length]);
+
+  const handleRemoveMedia = useCallback((id: string) => {
+    setPendingMedia((prev) => {
+      const target = prev.find((m) => m.id === id);
+      if (target) URL.revokeObjectURL(target.previewUrl);
+      return prev.filter((m) => m.id !== id);
+    });
   }, []);
 
   const handleSubmit = useCallback(async () => {
-    if (!content.trim() || loading) return;
+    const readyMedia = pendingMedia.filter((m) => m.uploaded).map((m) => m.uploaded!);
+    const stillUploading = pendingMedia.some((m) => m.uploading);
+    if ((!content.trim() && readyMedia.length === 0) || loading) return;
+    if (stillUploading) {
+      toast.error('Still uploading — hang on a sec');
+      return;
+    }
     try {
       await createPost({
         variables: {
@@ -76,6 +142,9 @@ export function CreatePost() {
             visibility,
             feeling: feeling || undefined,
             location: location.trim() || undefined,
+            media: readyMedia.length
+              ? readyMedia.map(({ url, type }) => ({ url, type }))
+              : undefined,
           },
         },
       });
@@ -84,9 +153,11 @@ export function CreatePost() {
     } catch (err: any) {
       toast.error(err?.graphQLErrors?.[0]?.message ?? 'Failed to create post');
     }
-  }, [content, visibility, feeling, location, loading, createPost, handleReset]);
+  }, [content, visibility, feeling, location, loading, createPost, handleReset, pendingMedia]);
 
-  const canSubmit = content.trim().length > 0 && !loading;
+  const hasUploadingMedia = pendingMedia.some((m) => m.uploading);
+  const hasReadyMedia = pendingMedia.some((m) => m.uploaded);
+  const canSubmit = (content.trim().length > 0 || hasReadyMedia) && !loading && !hasUploadingMedia;
   const charCount = content.length;
   const charLimit = 63206;
   const visOpt = VISIBILITY_OPTIONS.find((v) => v.value === visibility)!;
@@ -163,6 +234,38 @@ export function CreatePost() {
               </div>
             )}
 
+            {/* Media previews */}
+            {pendingMedia.length > 0 && (
+              <div className="grid grid-cols-2 gap-2 mt-3">
+                {pendingMedia.map((m) => (
+                  <div key={m.id} className="relative rounded-xl overflow-hidden bg-gray-100 dark:bg-surface-dark-3 aspect-video group">
+                    {m.file.type.startsWith('video/') ? (
+                      <video src={m.previewUrl} className="w-full h-full object-cover" muted />
+                    ) : (
+                      <img src={m.previewUrl} alt="" className="w-full h-full object-cover" />
+                    )}
+                    {m.uploading && (
+                      <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
+                        <Loader2 size={22} className="text-white animate-spin" />
+                      </div>
+                    )}
+                    {m.error && (
+                      <div className="absolute inset-0 bg-red-900/70 flex items-center justify-center p-2">
+                        <p className="text-white text-xs text-center">{m.error}</p>
+                      </div>
+                    )}
+                    <button
+                      onClick={() => handleRemoveMedia(m.id)}
+                      aria-label="Remove attachment"
+                      className="absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-black/60 hover:bg-black/80 text-white flex items-center justify-center transition-colors"
+                    >
+                      <X size={13} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
             {/* Feelings picker */}
             <AnimatePresence>
               {showFeelings && (
@@ -194,7 +297,22 @@ export function CreatePost() {
         !expanded && 'border-t-0 pt-0'
       )}>
         <div className="flex items-center gap-0.5">
-          <button className="flex items-center gap-1.5 px-3 py-2 rounded-lg hover:bg-gray-100 dark:hover:bg-surface-dark-3 text-sm font-medium text-gray-600 dark:text-gray-300 transition-colors">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*,video/*"
+            multiple
+            className="hidden"
+            onChange={(e) => {
+              handleFilesSelected(e.target.files);
+              e.target.value = ''; // allow re-selecting the same file
+            }}
+          />
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={pendingMedia.length >= MAX_ATTACHMENTS}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg hover:bg-gray-100 dark:hover:bg-surface-dark-3 disabled:opacity-40 disabled:cursor-not-allowed text-sm font-medium text-gray-600 dark:text-gray-300 transition-colors"
+          >
             <Image size={18} className="text-green-500" />
             <span className="hidden sm:inline">Photo/Video</span>
           </button>

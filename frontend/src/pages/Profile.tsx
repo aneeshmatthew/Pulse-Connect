@@ -117,7 +117,7 @@ export function ProfilePage() {
             {/* Avatar row */}
             <div className="flex items-end justify-between -mt-14 mb-3">
               <div className="relative">
-                <div className="w-28 h-28 rounded-full border-4 border-white dark:border-surface-dark-2 overflow-hidden ring-2 ring-gray-100 dark:ring-gray-700">
+                <div className="inline-flex rounded-full border-4 border-white dark:border-surface-dark-2 overflow-hidden ring-2 ring-gray-100 dark:ring-gray-700">
                   <Avatar src={profile.avatar} name={profile.fullName} size="xl" />
                 </div>
                 {profile.isOnline && (
