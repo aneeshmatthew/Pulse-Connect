@@ -14,7 +14,6 @@ import { typeDefs } from './graphql/typedefs';
 import { resolvers } from './graphql/resolvers';
 import { createContext, createWsContext } from './graphql/context';
 import { uploadRouter } from './routes/upload';
-import path from 'path';
 
 const PORT = parseInt(process.env.PORT ?? '4000', 10);
 const isDev = process.env.NODE_ENV !== 'production';
@@ -115,8 +114,8 @@ async function bootstrap() {
     expressMiddleware(apolloServer, { context: createContext })
   );
 
-  // ── Media upload (local disk — dev/self-hosted only, see routes/upload.ts) ─
-  app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
+  // ── Media upload signature endpoint (Cloudinary direct-to-cloud upload,
+  //    see routes/upload.ts — no files ever touch this server) ──────────────
   app.use('/api', uploadRouter);
 
   // ── Health & readiness probes ─────────────────────────────────────────────

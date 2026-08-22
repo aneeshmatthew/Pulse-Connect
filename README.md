@@ -141,6 +141,11 @@ JWT_EXPIRES_IN=7d
 # Frontend URL (used for CORS)
 FRONTEND_URL=http://localhost:5173
 
+# Cloudinary (photo/video upload) — from cloudinary.com/console dashboard
+CLOUDINARY_CLOUD_NAME=your-cloud-name
+CLOUDINARY_API_KEY=your-api-key
+CLOUDINARY_API_SECRET=your-api-secret
+
 
 ### 3. Seed Demo Data
 
@@ -251,6 +256,25 @@ subscription { newNotification { type message sender { fullName } } }
 
 Running log of gaps found during review, kept up to date as issues are found and fixed. Newest entries at the top.
 
+### 2026-08-21 (4) — Media upload moved off local disk to Cloudinary (production-ready on Vercel)
+
+**Context:** Entry (2) below shipped a working Photo/Video upload pipeline, but explicitly flagged it as **not production-ready** — it used `multer` to write files to this server's local disk, which doesn't persist on Vercel serverless (ephemeral, per-invocation filesystem, no shared volume). This entry replaces that implementation with real cloud object storage, closing that gap.
+
+**What changed:** Switched to **Cloudinary** using the same signed direct-upload pattern real platforms use (Facebook, Instagram, etc.) — the browser uploads the file bytes straight to Cloudinary; our backend never receives them at all, it only issues a short-lived signature proving the request came from a logged-in user.
+
+1. `backend/src/config/cloudinary.ts` (new) — configures the Cloudinary SDK from `CLOUDINARY_CLOUD_NAME` / `CLOUDINARY_API_KEY` / `CLOUDINARY_API_SECRET` env vars. Missing config logs a warning and disables uploads instead of crashing the whole server.
+2. `backend/src/routes/upload.ts` (rewritten) — was a `multer` disk-storage file receiver at `POST /api/upload`; is now a signature issuer at `POST /api/upload/signature` (still behind `requireAuthHeader`). Returns `{ signature, timestamp, folder, apiKey, cloudName }`, nothing else.
+3. `frontend/src/utils/index.ts`'s `uploadMedia()` — now a two-step flow: fetch a signature from our backend, then `POST` the file directly to `https://api.cloudinary.com/v1_1/<cloud>/auto/upload` with that signature. Returns Cloudinary's `secure_url` (CDN-backed) instead of a URL pointing at our own server.
+4. `backend/src/index.ts` — dropped `express.static('/uploads')` (nothing to serve locally anymore) and the unused `path` import.
+5. `backend/api/_app.ts` — the upload signature route is now mounted here too. It was deliberately **not** mounted before because the old disk-based route couldn't survive on serverless; the new one has no disk dependency at all, so it's safe on Vercel.
+6. Removed the now-unused `multer`/`@types/multer` dependencies from `backend/package.json`.
+
+**What you need to do to enable it:** sign up for Cloudinary, grab your **Cloud Name / API Key / API Secret** from the Console dashboard, and set them as env vars — `backend/.env` locally, and Vercel Project Settings → Environment Variables for production. See `backend/.env.example` for the exact variable names. `CLOUDINARY_API_SECRET` must only ever be set server-side.
+
+**Files touched:** `backend/src/config/cloudinary.ts` (new), `backend/src/routes/upload.ts`, `backend/src/index.ts`, `backend/api/_app.ts`, `backend/package.json`, `backend/.env.example`, `frontend/src/utils/index.ts`, `.gitignore`
+
+**Status:** ✅ Fixed, typechecked clean on both `frontend` and `backend`. Requires Cloudinary credentials to be set before upload will actually work — without them the signature endpoint returns a clear 503 instead of a silent failure.
+
 ### 2026-08-21 (3) — Check-in used the browser's native `window.prompt()`
 
 **Symptom (reported by user):** Clicking "Check in" in the post composer popped up the browser's default `prompt()` dialog to ask for a location. Flagged as bad UX — native prompts can't be styled, block the main thread, look inconsistent across browsers, and don't fit the app's design language.
@@ -273,20 +297,18 @@ Running log of gaps found during review, kept up to date as issues are found and
 1. **Notification dropdown was read-only** (`frontend/src/components/Sidebar/Navbar.tsx`): each notification just rendered `n.message` as text. The backend already had working `acceptFriendRequest` and `declineFriendRequest` mutations (used elsewhere on the Profile page), and the frontend already had an `ACCEPT_FRIEND_REQUEST` mutation defined — but neither was wired into the notification list, and `DECLINE_FRIEND_REQUEST` wasn't even defined on the frontend at all.
    - *Fix:* added `DECLINE_FRIEND_REQUEST` to `lib/graphql.ts`, and added Confirm/Delete buttons under any `FRIEND_REQUEST`-type notification that call the accept/decline mutations, refetch notifications, and swap to an "Accepted"/"Declined" status inline.
 2. **Photo/Video button had no `onClick` at all** (`frontend/src/components/Post/CreatePost.tsx`) — it was pure UI chrome. This is **not a database limitation**: `Post.media` was already a fully-modeled array (`url`, `type`, `thumbnail`, `width`, `height`, `duration`) in both the Mongoose schema and the GraphQL schema, `createPost` already accepted a `media` array and would happily save it, and `PostCard.tsx` already had full rendering logic for image/video grids. The entire pipeline existed except for two things: nothing on the frontend ever opened a file picker or called `createPost` with `media` populated, and — the actual missing piece — **there was no upload endpoint anywhere to turn a picked file into a URL**. `multer` was sitting in `backend/package.json` as an unused dependency; a `scalar Upload` was declared in the GraphQL schema but never given a resolver or used by any mutation.
-   - *Fix:* added a REST upload endpoint (`backend/src/routes/upload.ts`, mounted at `POST /api/upload` in `backend/src/index.ts`) using `multer` disk storage + JWT auth (`backend/src/lib/authMiddleware.ts`), serving saved files back out via `express.static('/uploads')`. Wired the frontend composer with a hidden file input, upload progress/preview grid, and remove buttons (`utils/index.ts`'s new `uploadMedia()` helper posts to this endpoint and returns `{ url, type }`, which then goes straight into the existing `createPost` mutation's `media` field).
-   - **Caveat — this only works for the standalone/self-hosted backend (`npm run dev`, or `node dist/index.js` on a normal host).** It will **not** persist on the Vercel serverless deployment (`backend/api/`): serverless function instances have an ephemeral, per-invocation filesystem with no shared volume, so a file saved in one invocation isn't guaranteed to exist for the next request that tries to serve it. Production deployment on Vercel needs this endpoint swapped for real object storage (S3, Cloudinary, Vercel Blob, R2, etc.), typically via signed/presigned upload URLs so the browser uploads directly to the bucket instead of through the API function. This is called out in a code comment at the top of `routes/upload.ts`.
+   - *Fix (v1):* added a REST upload endpoint using `multer` disk storage, serving files back out via `express.static('/uploads')`. **Superseded by entry (4) above**, which replaces local disk storage with Cloudinary so this actually works in production on Vercel.
 
-**Files touched:** `frontend/src/lib/graphql.ts`, `frontend/src/components/Sidebar/Navbar.tsx`, `frontend/src/components/Post/CreatePost.tsx`, `frontend/src/utils/index.ts`, `backend/src/routes/upload.ts` (new), `backend/src/lib/authMiddleware.ts` (new), `backend/src/index.ts`, `.gitignore`
+**Files touched:** `frontend/src/lib/graphql.ts`, `frontend/src/components/Sidebar/Navbar.tsx`, `frontend/src/components/Post/CreatePost.tsx`, `frontend/src/utils/index.ts`, `backend/src/lib/authMiddleware.ts` (new), `backend/src/index.ts`
 
-**Status:** ✅ Notification accept/decline fixed and typechecked. ⚠️ Photo/Video upload fixed and typechecked for local/self-hosted dev; **not yet production-ready on the Vercel deployment** — needs an object-storage provider wired in before shipping.
+**Status:** ✅ Notification accept/decline fixed and typechecked. Photo/Video upload: see entry (4) for the production-ready version.
 
 ### Open items to verify next
-- [ ] Wire a real object-storage provider (S3/Cloudinary/Vercel Blob/R2) for `POST /api/upload` before relying on media uploads in the Vercel-deployed backend; until then, uploaded media will work locally but may 404 in production.
-- [ ] `backend/api/_app.ts` (the Vercel serverless entrypoint) does not mount the new upload route at all yet — it was intentionally left off rather than shipping a route that silently loses files in production.
 - [ ] Notification click-through (tapping a non-friend-request notification, e.g. `POST_LIKE`/`POST_COMMENT`, to navigate to the relevant post) is still not implemented — only the friend-request action buttons were added.
 - [ ] Audit other non-nullable `User!`/`Post!` list fields (e.g. `Post.reactions[].user`, `Comment.author`) for the same "lean doc without a field resolver" pattern — the friends bug suggests this may not be isolated.
 - [ ] No automated test currently guards against a populated-list field silently returning `null`; consider a resolver-level integration test for `GET_USER` with a seeded user that has friends.
 - [ ] Avatar component has no visual regression/story coverage, so size-variant mismatches like this aren't caught until manual QA.
+- [ ] Uploaded media currently has no server-side validation beyond what Cloudinary's client SDK enforces (file type/size); consider an `eager` transformation or moderation add-on if user-generated content moderation becomes a concern.
 
 ### 2026-08-21 (1) — Profile page: avatar off-center + Friends tab empty despite correct count
 

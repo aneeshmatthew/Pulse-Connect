@@ -9,6 +9,7 @@ import connectDB from '../src/config/database';
 import { typeDefs } from '../src/graphql/typedefs';
 import { resolvers } from '../src/graphql/resolvers';
 import { createContext } from '../src/graphql/context';
+import { uploadRouter } from '../src/routes/upload';
 
 const isDev = process.env.NODE_ENV !== 'production';
 
@@ -91,6 +92,10 @@ async function buildApp(): Promise<Express> {
     ['/api/graphql', '/graphql'],
     expressMiddleware(apolloServer, { context: createContext })
   );
+
+  // Media upload signature endpoint — safe on serverless since no file
+  // bytes are ever written to this server's disk (see src/routes/upload.ts).
+  app.use('/api', uploadRouter);
 
   // Global error handler.
   app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {

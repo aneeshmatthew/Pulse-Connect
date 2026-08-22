@@ -1,81 +1,50 @@
-import { Router, Request, Response } from 'express';
-import multer from 'multer';
-import path from 'path';
-import fs from 'fs';
-import crypto from 'crypto';
+import { Router, Response } from 'express';
 import { requireAuthHeader, AuthedRequest } from '../lib/authMiddleware';
+import { cloudinary, cloudinaryConfigured } from '../config/cloudinary';
 
 // ─────────────────────────────────────────────────────────────────────────
-// NOTE — local disk storage only works for the standalone dev/self-hosted
-// server (`backend/src/index.ts`, e.g. `npm run dev` or `node dist/index.js`
-// on a normal long-lived host/container).
+// Media uploads go straight from the browser to Cloudinary — this backend
+// never receives or stores the file bytes at all, which is why this works
+// unchanged whether you're running the standalone dev server or deployed on
+// Vercel serverless (there's no local disk in the picture to lose files
+// between invocations, unlike the old multer-based version of this route).
 //
-// It will NOT work on the Vercel serverless deployment (backend/api/).
-// Serverless function instances have an ephemeral, per-invocation
-// filesystem with no shared or persistent volume across invocations or
-// regions — a file written by one invocation is not guaranteed to still
-// exist (or be visible) on the next request that tries to serve it. For a
-// production deploy on Vercel, swap this route for a real object-storage
-// provider (S3, Cloudinary, Vercel Blob, R2, etc.), typically via signed
-// upload URLs so the browser uploads directly to the bucket. See the "Known
-// Gaps" section of the README for details.
+// Flow:
+//   1. Client asks this route for a signature (proves they're logged in).
+//   2. Client POSTs the actual file directly to Cloudinary's API using
+//      that signature — see frontend/src/utils/index.ts's uploadMedia().
+//   3. Cloudinary returns a permanent URL; the client sends that URL to
+//      createPost/createStory. This server only ever sees a URL string.
 // ─────────────────────────────────────────────────────────────────────────
-
-const UPLOAD_DIR = path.join(__dirname, '../../uploads');
-fs.mkdirSync(UPLOAD_DIR, { recursive: true });
-
-const MAX_FILE_SIZE_MB = 25;
-const ALLOWED_MIME_PREFIXES = ['image/', 'video/'];
-
-const storage = multer.diskStorage({
-  destination: (_req, _file, cb) => cb(null, UPLOAD_DIR),
-  filename: (_req, file, cb) => {
-    const ext = path.extname(file.originalname).toLowerCase();
-    const safeExt = /^\.[a-z0-9]{1,5}$/.test(ext) ? ext : '';
-    cb(null, `${crypto.randomUUID()}${safeExt}`);
-  },
-});
-
-const upload = multer({
-  storage,
-  limits: { fileSize: MAX_FILE_SIZE_MB * 1024 * 1024 },
-  fileFilter: (_req, file, cb) => {
-    const allowed = ALLOWED_MIME_PREFIXES.some((p) => file.mimetype.startsWith(p));
-    if (!allowed) return cb(new Error('Only image and video files are allowed'));
-    cb(null, true);
-  },
-});
-
-function mediaTypeFor(mimetype: string): 'IMAGE' | 'VIDEO' | 'GIF' {
-  if (mimetype === 'image/gif') return 'GIF';
-  if (mimetype.startsWith('video/')) return 'VIDEO';
-  return 'IMAGE';
-}
 
 export const uploadRouter = Router();
 
-uploadRouter.post(
-  '/upload',
-  requireAuthHeader,
-  (req: AuthedRequest, res: Response) => {
-    upload.single('file')(req, res, (err: unknown) => {
-      if (err) {
-        const message = err instanceof Error ? err.message : 'Upload failed';
-        return res.status(400).json({ error: message });
-      }
-      if (!req.file) {
-        return res.status(400).json({ error: 'No file provided' });
-      }
-
-      const protocol = (req.headers['x-forwarded-proto'] as string) || req.protocol;
-      const url = `${protocol}://${req.get('host')}/uploads/${req.file.filename}`;
-
-      res.json({
-        url,
-        type: mediaTypeFor(req.file.mimetype),
-        filename: req.file.filename,
-        size: req.file.size,
-      });
+uploadRouter.post('/upload/signature', requireAuthHeader, (req: AuthedRequest, res: Response) => {
+  if (!cloudinaryConfigured) {
+    return res.status(503).json({
+      error: 'Media upload is not configured. Set CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, ' +
+        'and CLOUDINARY_API_SECRET in the backend environment.',
     });
   }
-);
+
+  const timestamp = Math.round(Date.now() / 1000);
+  // Scope uploads under a per-user folder — purely organizational (helps
+  // browsing the Cloudinary media library), not an access-control boundary.
+  const folder = `pulse-connect/${req.userId}`;
+
+  // Only params actually sent to Cloudinary's upload API need to be part of
+  // the signature (excludes file, api_key, cloud_name — those aren't signed).
+  const paramsToSign = { timestamp, folder };
+  const signature = cloudinary.utils.api_sign_request(
+    paramsToSign,
+    process.env.CLOUDINARY_API_SECRET!
+  );
+
+  res.json({
+    signature,
+    timestamp,
+    folder,
+    apiKey: process.env.CLOUDINARY_API_KEY,
+    cloudName: process.env.CLOUDINARY_CLOUD_NAME,
+  });
+});

@@ -39,14 +39,17 @@ export function formatDate(date: string | Date | null | undefined): string {
 }
 
 // ── Media upload ──────────────────────────────────────────────────────────
-// Uploads a file to the backend's REST /api/upload route (see
-// backend/src/routes/upload.ts) and returns the stored URL + media type
-// ready to hand to the createPost/createStory GraphQL mutations.
-//
-// NOTE: this REST endpoint uses local disk storage, which only works
-// against the standalone dev/self-hosted backend — it will not persist
-// files on the Vercel serverless deployment. See the README's "Known Gaps"
-// section for what production needs instead (S3/Cloudinary/etc.).
+// Files never touch our own backend. Flow:
+//   1. Ask our backend for a signature (POST /api/upload/signature) — this
+//      proves the request came from a logged-in user without exposing our
+//      Cloudinary API secret to the browser.
+//   2. POST the actual file straight to Cloudinary's API using that
+//      signature. Our server's compute is never in the request path for
+//      the file bytes, which is why this works identically on the
+//      standalone dev server and on Vercel serverless — there's no local
+//      disk involved anywhere.
+//   3. Cloudinary returns a permanent, CDN-backed URL we hand to the
+//      createPost/createStory GraphQL mutations.
 export interface UploadedMedia {
   url: string;
   type: 'IMAGE' | 'VIDEO' | 'GIF';
@@ -65,23 +68,58 @@ function apiBaseUrl(): string {
   return graphqlUrl.replace(/\/graphql$/, '');
 }
 
-export async function uploadMedia(file: File): Promise<UploadedMedia> {
-  const token = localStorage.getItem('token');
-  const formData = new FormData();
-  formData.append('file', file);
+interface UploadSignature {
+  signature: string;
+  timestamp: number;
+  folder: string;
+  apiKey: string;
+  cloudName: string;
+}
 
-  const res = await fetch(`${apiBaseUrl()}/api/upload`, {
+async function getUploadSignature(): Promise<UploadSignature> {
+  const token = localStorage.getItem('token');
+  const res = await fetch(`${apiBaseUrl()}/api/upload/signature`, {
     method: 'POST',
     headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error ?? `Could not start upload (${res.status})`);
+  }
+  return res.json();
+}
+
+export async function uploadMedia(file: File): Promise<UploadedMedia> {
+  const { signature, timestamp, folder, apiKey, cloudName } = await getUploadSignature();
+
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('api_key', apiKey);
+  formData.append('timestamp', String(timestamp));
+  formData.append('signature', signature);
+  formData.append('folder', folder);
+
+  // 'auto' lets Cloudinary accept either images or videos on the same
+  // endpoint and pick the right resource_type itself.
+  const res = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/auto/upload`, {
+    method: 'POST',
     body: formData,
   });
 
+  const body = await res.json().catch(() => null);
   if (!res.ok) {
-    const body = await res.json().catch(() => null);
-    throw new Error(body?.error ?? `Upload failed (${res.status})`);
+    throw new Error(body?.error?.message ?? `Upload failed (${res.status})`);
   }
 
-  return res.json();
+  const type: UploadedMedia['type'] =
+    body.resource_type === 'video' ? 'VIDEO' : body.format === 'gif' ? 'GIF' : 'IMAGE';
+
+  return {
+    url: body.secure_url,
+    type,
+    filename: body.public_id,
+    size: body.bytes,
+  };
 }
 
 // ── Reactions ─────────────────────────────────────────────────────────────────
