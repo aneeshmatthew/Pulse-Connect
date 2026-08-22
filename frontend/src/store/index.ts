@@ -69,14 +69,29 @@ export const useAuthStore = create<AuthState>()(
 
 // ─── UI store ─────────────────────────────────────────────────────────────────
 
+interface ChatRecipient {
+  id: string;
+  fullName: string;
+  avatar?: string | null;
+  username: string;
+  isOnline: boolean;
+}
+
 interface UIState {
   darkMode: boolean;
   sidebarOpen: boolean;
   chatOpen: boolean;
   activeChatId: string | null;
+  // Set when a chat is opened from somewhere that only knows the *person*
+  // (e.g. Profile.tsx's "Message" button) rather than an existing
+  // conversation id. ChatPanel checks for an existing conversation and, if
+  // none exists, renders the chat window in "pending" mode — the first
+  // message sent creates the conversation server-side.
+  pendingRecipient: ChatRecipient | null;
   toggleDarkMode: () => void;
   toggleSidebar: () => void;
   openChat: (id: string) => void;
+  openChatWithUser: (recipient: ChatRecipient) => void;
   closeChat: () => void;
 }
 
@@ -88,6 +103,7 @@ export const useUIStore = create<UIState>()(
         sidebarOpen: true,
         chatOpen: false,
         activeChatId: null,
+        pendingRecipient: null,
 
         toggleDarkMode: () =>
           set((s) => {
@@ -99,8 +115,10 @@ export const useUIStore = create<UIState>()(
 
         toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen }), false, 'ui/toggleSidebar'),
 
-        openChat: (id) => set({ chatOpen: true, activeChatId: id }, false, 'ui/openChat'),
-        closeChat: () => set({ chatOpen: false, activeChatId: null }, false, 'ui/closeChat'),
+        openChat: (id) => set({ chatOpen: true, activeChatId: id, pendingRecipient: null }, false, 'ui/openChat'),
+        openChatWithUser: (recipient) =>
+          set({ chatOpen: true, activeChatId: null, pendingRecipient: recipient }, false, 'ui/openChatWithUser'),
+        closeChat: () => set({ chatOpen: false, activeChatId: null, pendingRecipient: null }, false, 'ui/closeChat'),
       }),
       { name: 'ui-storage', partialize: (s) => ({ darkMode: s.darkMode }) }
     ),

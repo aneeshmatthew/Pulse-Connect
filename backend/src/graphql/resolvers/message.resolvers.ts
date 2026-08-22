@@ -279,5 +279,20 @@ export const messageResolvers = {
     id: (parent: any) => parent._id?.toString() ?? parent.id,
     // Redact content of deleted messages at resolver level
     content: (parent: any) => (parent.isDeleted ? '' : parent.content),
+
+    // `Message.conversation` is populated by the query resolvers above
+    // when they need it, but `sendMessage`'s return value never populated
+    // it. The frontend needs it to learn the new conversation's id right
+    // after starting a brand-new DM (see Profile.tsx's "Message" button /
+    // ChatWindow's pending-recipient mode) — resolve it lazily here rather
+    // than everywhere a Message might be returned, same "don't rely on
+    // every query author remembering to .populate()" fix as User.friends
+    // and Post.tags.
+    conversation: async (parent: any) => {
+      if (parent.conversation && typeof parent.conversation === 'object' && parent.conversation.participants) {
+        return parent.conversation; // already populated
+      }
+      return Conversation.findById(parent.conversation).lean();
+    },
   },
 };

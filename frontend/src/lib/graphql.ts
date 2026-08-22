@@ -265,9 +265,24 @@ export const DECLINE_FRIEND_REQUEST = gql`
 
 export const SEND_MESSAGE = gql`
   mutation SendMessage($input: SendMessageInput!) {
-    sendMessage(input: $input) { ...MessageFields }
+    sendMessage(input: $input) {
+      ...MessageFields
+      conversation { id }
+    }
   }
   ${MESSAGE_FIELDS}
+`;
+
+// Used when opening a chat from somewhere that only knows the *person*
+// (e.g. a profile page), not an existing conversation — lets us check
+// whether one already exists before falling back to "start a new one on
+// first send" (see ChatWindow's pending-recipient mode).
+export const CONVERSATION_WITH_USER = gql`
+  query ConversationWithUser($userId: ID!) {
+    conversationWithUser(userId: $userId) {
+      id
+    }
+  }
 `;
 
 export const SET_TYPING = gql`

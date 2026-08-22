@@ -6,7 +6,7 @@ import { Send, X, Phone, Video, Info, Image, Smile } from 'lucide-react';
 import {
   GET_MESSAGES, SEND_MESSAGE, SET_TYPING,
   NEW_MESSAGE_SUB, TYPING_STATUS_SUB,
-  MARK_CONVERSATION_READ, GET_CONVERSATIONS,
+  MARK_CONVERSATION_READ, GET_CONVERSATIONS, CONVERSATION_WITH_USER,
 } from '@/lib/graphql';
 import { subscriptionsEnabled, POLL_INTERVAL_MS } from '@/lib/apollo';
 import { Avatar } from '@/components/UI/Avatar';
@@ -90,13 +90,17 @@ const Bubble = memo(function Bubble({ msg, isMine, otherAvatar, otherName }: Bub
 // ─── Chat window ─────────────────────────────────────────────────────────────
 
 interface ChatWindowProps {
-  conversationId: string;
+  // null means: we're messaging this person for the first time — no
+  // conversation exists yet. Message history/typing/read-receipts are all
+  // skipped until the first message is sent and the server creates one
+  // (see handleSend below).
+  conversationId: string | null;
   participant: any; // the OTHER person in the DM
 }
 
 const ChatWindow = memo(function ChatWindow({ conversationId, participant }: ChatWindowProps) {
   const { user } = useAuthStore();
-  const { closeChat } = useUIStore();
+  const { closeChat, openChat } = useUIStore();
   const [text, setText] = useState('');
   const [minimized, setMinimized] = useState(false);
   const [otherTyping, setOtherTyping] = useState(false);
@@ -117,7 +121,12 @@ const ChatWindow = memo(function ChatWindow({ conversationId, participant }: Cha
   const [sendMessage, { loading: sending }] = useMutation(SEND_MESSAGE, {
     update(cache, { data }) {
       const newMsg = data?.sendMessage;
-      if (!newMsg) return;
+      // Nothing to merge into GET_MESSAGES yet if this was the very first
+      // message of a brand-new conversation — there's no cached query for
+      // a conversationId that didn't exist when this component mounted.
+      // handleSend() below promotes to the real conversationId afterward,
+      // which remounts this component and fetches fresh from the server.
+      if (!newMsg || !conversationId) return;
       cache.updateQuery(
         { query: GET_MESSAGES, variables: { conversationId, limit: 40 } },
         (existing) => {
@@ -135,7 +144,7 @@ const ChatWindow = memo(function ChatWindow({ conversationId, participant }: Cha
 
   useSubscription(NEW_MESSAGE_SUB, {
     variables: { conversationId },
-    skip: !subscriptionsEnabled,
+    skip: !subscriptionsEnabled || !conversationId,
     onData: ({ client, data }) => {
       const newMsg = data.data?.newMessage;
       if (!newMsg) return;
@@ -159,7 +168,7 @@ const ChatWindow = memo(function ChatWindow({ conversationId, participant }: Cha
   // simply unavailable without a WebSocket-capable backend.
   useSubscription(TYPING_STATUS_SUB, {
     variables: { conversationId },
-    skip: !subscriptionsEnabled,
+    skip: !subscriptionsEnabled || !conversationId,
     onData: ({ data }) => {
       const s = data.data?.typingStatus;
       if (s && s.userId !== user?.id) {
@@ -199,6 +208,7 @@ const ChatWindow = memo(function ChatWindow({ conversationId, participant }: Cha
   }, [messages.length]);
 
   const stopTyping = useCallback(() => {
+    if (!conversationId) return; // no conversation yet — nothing to signal
     if (isTypingRef.current) {
       isTypingRef.current = false;
       setTypingMutation({ variables: { conversationId, isTyping: false } });
@@ -206,6 +216,7 @@ const ChatWindow = memo(function ChatWindow({ conversationId, participant }: Cha
   }, [conversationId, setTypingMutation]);
 
   const handleTyping = useCallback(() => {
+    if (!conversationId) return; // no conversation yet — nothing to signal
     if (!isTypingRef.current) {
       isTypingRef.current = true;
       setTypingMutation({ variables: { conversationId, isTyping: true } });
@@ -228,11 +239,24 @@ const ChatWindow = memo(function ChatWindow({ conversationId, participant }: Cha
     setText('');
     stopTyping();
     try {
-      await sendMessage({ variables: { input: { conversationId, content } } });
+      const { data } = await sendMessage({
+        variables: {
+          input: conversationId
+            ? { conversationId, content }
+            : { recipientId: participant.id, content }, // first message — server creates the conversation
+        },
+      });
+      if (!conversationId) {
+        // Promote from "pending" to a real conversation now that one
+        // exists, so subsequent renders use the normal conversationId flow
+        // (message history, subscriptions, read receipts, etc.).
+        const newConversationId = data?.sendMessage?.conversation?.id;
+        if (newConversationId) openChat(newConversationId);
+      }
     } catch {
       setText(content); // restore on error
     }
-  }, [text, sending, conversationId, sendMessage, stopTyping]);
+  }, [text, sending, conversationId, sendMessage, stopTyping, participant.id, openChat]);
 
   return (
     <motion.div
@@ -352,7 +376,7 @@ const ChatWindow = memo(function ChatWindow({ conversationId, participant }: Cha
 // ─── Panel container ──────────────────────────────────────────────────────────
 
 export function ChatPanel() {
-  const { chatOpen, activeChatId } = useUIStore();
+  const { chatOpen, activeChatId, pendingRecipient, openChat } = useUIStore();
   const { user } = useAuthStore();
 
   const { data } = useQuery(GET_CONVERSATIONS, {
@@ -360,25 +384,63 @@ export function ChatPanel() {
     pollInterval: subscriptionsEnabled ? 0 : POLL_INTERVAL_MS.conversationsList,
   });
 
-  if (!chatOpen || !activeChatId || !user) return null;
+  // When a chat is opened via openChatWithUser() (e.g. Profile.tsx's
+  // "Message" button — we only know the *person*, not a conversation),
+  // check whether a conversation with them already exists.
+  const { data: existingConvData, loading: checkingExisting } = useQuery(CONVERSATION_WITH_USER, {
+    variables: { userId: pendingRecipient?.id },
+    skip: !pendingRecipient,
+  });
 
-  const conversation = (data?.conversations ?? []).find((c: any) => c.id === activeChatId);
-  if (!conversation) return null;
+  // If one does, normalize to the regular activeChatId flow (message
+  // history, subscriptions, read receipts) instead of staying in
+  // "pending" mode.
+  useEffect(() => {
+    if (pendingRecipient && existingConvData?.conversationWithUser?.id) {
+      openChat(existingConvData.conversationWithUser.id);
+    }
+  }, [pendingRecipient, existingConvData, openChat]);
 
-  // ✅ Fix: find the OTHER participant, not by conversation ID (was always undefined)
-  const participant =
-    conversation.participants.find((p: any) => p.id !== user.id) ??
-    conversation.participants[0];
+  if (!chatOpen || !user) return null;
+  if (!activeChatId && !pendingRecipient) return null;
 
-  if (!participant) return null;
+  if (activeChatId) {
+    const conversation = (data?.conversations ?? []).find((c: any) => c.id === activeChatId);
+    if (!conversation) return null;
+
+    // ✅ Fix: find the OTHER participant, not by conversation ID (was always undefined)
+    const participant =
+      conversation.participants.find((p: any) => p.id !== user.id) ??
+      conversation.participants[0];
+
+    if (!participant) return null;
+
+    return (
+      <div className="fixed bottom-0 right-6 z-50 flex items-end gap-3">
+        <AnimatePresence>
+          <ChatWindow
+            key={activeChatId}
+            conversationId={activeChatId}
+            participant={participant}
+          />
+        </AnimatePresence>
+      </div>
+    );
+  }
+
+  // pendingRecipient path: still checking, or confirmed no conversation
+  // exists yet — render the window immediately (we already have the
+  // person's info) so the UI responds right away instead of looking like
+  // nothing happened. Message history stays empty until the first send.
+  if (checkingExisting) return null;
 
   return (
     <div className="fixed bottom-0 right-6 z-50 flex items-end gap-3">
       <AnimatePresence>
         <ChatWindow
-          key={activeChatId}
-          conversationId={activeChatId}
-          participant={participant}
+          key={`pending-${pendingRecipient!.id}`}
+          conversationId={null}
+          participant={pendingRecipient}
         />
       </AnimatePresence>
     </div>

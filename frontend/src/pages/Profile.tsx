@@ -23,7 +23,7 @@ type Tab = typeof TABS[number];
 export function ProfilePage() {
   const { username } = useParams<{ username: string }>();
   const { user: me } = useAuthStore();
-  const { openChat } = useUIStore();
+  const { openChatWithUser } = useUIStore();
   const [activeTab, setActiveTab] = useState<Tab>('Posts');
   const [friendReqSent, setFriendReqSent] = useState(false);
 
@@ -154,7 +154,13 @@ export function ProfilePage() {
                       </button>
                     )}
                     <button
-                      onClick={() => openChat(profile.id)}
+                      onClick={() => openChatWithUser({
+                        id: profile.id,
+                        fullName: profile.fullName,
+                        avatar: profile.avatar,
+                        isOnline: profile.isOnline,
+                        username: profile.username,
+                      })}
                       className="flex items-center gap-2 px-5 py-2 bg-gray-100 dark:bg-surface-dark-3 text-sm font-semibold rounded-xl hover:bg-gray-200 transition-colors text-gray-800 dark:text-white"
                     >
                       <MessageCircle size={15} /> Message
