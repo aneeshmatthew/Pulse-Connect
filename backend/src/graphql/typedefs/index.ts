@@ -243,6 +243,11 @@ export const typeDefs = gql`
     # Posts
     post(id: ID!): Post
     userPosts(userId: ID!, cursor: String, limit: Int): FeedConnection!
+    # Same shape/pagination as userPosts, but only posts that actually have
+    # media attached — backs the Profile page's Photos tab (see
+    # userPhotos resolver in post.resolvers.ts for why this is a separate
+    # query rather than filtering userPosts client-side).
+    userPhotos(userId: ID!, cursor: String, limit: Int): FeedConnection!
 
     # Comments
     comments(postId: ID!, cursor: String, limit: Int): [Comment!]!

@@ -127,6 +127,23 @@ export const GET_USER_POSTS = gql`
   ${POST_FIELDS}
 `;
 
+// Backs the Profile page's Photos tab — only requests the fields the photo
+// grid actually needs (not the full PostFields fragment) since we're
+// flattening many posts' media into thumbnails, not rendering full post cards.
+export const GET_USER_PHOTOS = gql`
+  query GetUserPhotos($userId: ID!, $cursor: String, $limit: Int) {
+    userPhotos(userId: $userId, cursor: $cursor, limit: $limit) {
+      posts {
+        id
+        createdAt
+        media { url type thumbnail }
+      }
+      hasMore
+      nextCursor
+    }
+  }
+`;
+
 export const SEARCH_USERS = gql`
   query SearchUsers($query: String!) {
     searchUsers(query: $query) { ...UserFields }

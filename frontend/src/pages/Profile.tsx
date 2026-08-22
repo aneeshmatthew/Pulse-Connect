@@ -3,10 +3,10 @@ import { useParams } from 'react-router-dom';
 import { useQuery, useMutation } from '@apollo/client';
 import { motion } from 'framer-motion';
 import {
-  MapPin, Link2, Calendar, UserPlus, UserCheck, MessageCircle, Edit2,
+  MapPin, Link2, Calendar, UserPlus, UserCheck, MessageCircle, Edit2, Play,
 } from 'lucide-react';
 import {
-  GET_USER, GET_USER_POSTS,
+  GET_USER, GET_USER_POSTS, GET_USER_PHOTOS,
   SEND_FRIEND_REQUEST, ACCEPT_FRIEND_REQUEST,
 } from '@/lib/graphql';
 import { Avatar } from '@/components/UI/Avatar';
@@ -35,6 +35,14 @@ export function ProfilePage() {
   const { data: postsData, loading: postsLoading, fetchMore } = useQuery(GET_USER_POSTS, {
     variables: { userId: userData?.user?.id, limit: 10 },
     skip: !userData?.user?.id || activeTab !== 'Posts',
+  });
+
+  const {
+    data: photosData, loading: photosLoading,
+    fetchMore: fetchMorePhotos,
+  } = useQuery(GET_USER_PHOTOS, {
+    variables: { userId: userData?.user?.id, limit: 30 },
+    skip: !userData?.user?.id || activeTab !== 'Photos',
   });
 
   const [sendRequest, { loading: sendingReq }] = useMutation(SEND_FRIEND_REQUEST, {
@@ -319,7 +327,83 @@ export function ProfilePage() {
         {activeTab === 'Photos' && (
           <div className="bg-white dark:bg-surface-dark-2 rounded-xl shadow-card p-6">
             <h2 className="font-bold text-gray-900 dark:text-white text-lg mb-4">Photos</h2>
-            <p className="text-gray-400 text-sm">Photos from posts will appear here.</p>
+            {(() => {
+              // Flatten every post's media array into a single list of tiles.
+              // Keep postId + media index around per tile — not used for
+              // navigation yet (no single-post detail page exists), but
+              // gives each tile a stable, unique key.
+              const posts = photosData?.userPhotos?.posts ?? [];
+              const tiles = posts.flatMap((post: any) =>
+                (post.media ?? []).map((m: any, i: number) => ({ ...m, key: `${post.id}-${i}` }))
+              );
+              const hasMore = photosData?.userPhotos?.hasMore;
+              const nextCursor = photosData?.userPhotos?.nextCursor;
+
+              if (photosLoading && tiles.length === 0) {
+                return (
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {Array.from({ length: 9 }).map((_, i) => (
+                      <div key={i} className="aspect-square rounded-lg bg-gray-100 dark:bg-surface-dark-3 animate-pulse" />
+                    ))}
+                  </div>
+                );
+              }
+
+              if (tiles.length === 0) {
+                return <p className="text-gray-400 text-sm">No photos or videos yet.</p>;
+              }
+
+              return (
+                <>
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {tiles.map((tile: any) => (
+                      <a
+                        key={tile.key}
+                        href={tile.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="relative aspect-square rounded-lg overflow-hidden bg-gray-100 dark:bg-surface-dark-3 group"
+                      >
+                        {tile.type === 'VIDEO' ? (
+                          <>
+                            <video src={tile.url} className="w-full h-full object-cover" muted />
+                            <div className="absolute inset-0 bg-black/20 flex items-center justify-center group-hover:bg-black/30 transition-colors">
+                              <Play size={22} className="text-white fill-white" />
+                            </div>
+                          </>
+                        ) : (
+                          <img
+                            src={tile.thumbnail || tile.url}
+                            alt=""
+                            className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                            loading="lazy"
+                          />
+                        )}
+                      </a>
+                    ))}
+                  </div>
+                  {hasMore && (
+                    <button
+                      onClick={() => fetchMorePhotos({
+                        variables: { cursor: nextCursor },
+                        updateQuery: (prev, { fetchMoreResult }) => {
+                          if (!fetchMoreResult) return prev;
+                          return {
+                            userPhotos: {
+                              ...fetchMoreResult.userPhotos,
+                              posts: [...prev.userPhotos.posts, ...fetchMoreResult.userPhotos.posts],
+                            },
+                          };
+                        },
+                      })}
+                      className="w-full mt-3 py-2 text-sm font-medium text-brand-500 hover:bg-gray-50 dark:hover:bg-surface-dark-3 rounded-lg transition-colors"
+                    >
+                      Load more
+                    </button>
+                  )}
+                </>
+              );
+            })()}
           </div>
         )}
       </div>

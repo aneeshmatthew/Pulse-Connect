@@ -130,6 +130,34 @@ export const postResolvers = {
       const items = hasMore ? valid.slice(0, safeLimit) : valid;
       return { posts: items, hasMore, nextCursor: hasMore ? encodeCursor(items[items.length - 1].createdAt) : null, total: -1 };
     },
+
+    // Backs the Profile page's Photos tab. Previously that tab was a
+    // hardcoded placeholder ("Photos from posts will appear here.") with no
+    // query behind it at all — this is the actual missing piece, not a
+    // frontend rendering bug. Filtering `media` at the query level (rather
+    // than fetching userPosts and filtering client-side) keeps pagination
+    // correct: a page of "posts with photos" isn't skewed by text-only
+    // posts silently consuming slots in the limit.
+    userPhotos: async (_: unknown, { userId, cursor, limit = 15 }: any, { user }: GraphQLContext) => {
+      const safeLimit = Math.min(Math.max(1, limit), 50);
+      const isOwner = user?._id.toString() === userId;
+      const isFriend = user?.friends.some((id: any) => id.toString() === userId);
+
+      const query: any = { author: userId, 'media.0': { $exists: true } };
+      if (!isOwner) query.visibility = isFriend ? { $in: ['PUBLIC', 'FRIENDS'] } : 'PUBLIC';
+      if (cursor) query.createdAt = { $lt: decodeCursor(cursor) };
+
+      const posts = await Post.find(query)
+        .sort({ createdAt: -1 })
+        .limit(safeLimit + 1)
+        .populate({ path: 'author', select: '-password', match: { _id: { $exists: true } } })
+        .lean();
+
+      const valid = (posts as any[]).filter((p: any) => p.author != null);
+      const hasMore = valid.length > safeLimit;
+      const items = hasMore ? valid.slice(0, safeLimit) : valid;
+      return { posts: items, hasMore, nextCursor: hasMore ? encodeCursor(items[items.length - 1].createdAt) : null, total: -1 };
+    },
   },
 
   Mutation: {
