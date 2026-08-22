@@ -1,7 +1,7 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { useMutation } from '@apollo/client';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Image, Smile, MapPin, X, Globe, Users, Lock, Loader2 } from 'lucide-react';
+import { Image, Smile, MapPin, X, Globe, Users, Lock, Loader2, Check } from 'lucide-react';
 import { CREATE_POST, GET_FEED } from '@/lib/graphql';
 import { Avatar } from '@/components/UI/Avatar';
 import { useAuthStore } from '@/store';
@@ -40,9 +40,13 @@ export function CreatePost() {
   const [location, setLocation] = useState('');
   const [showVisibility, setShowVisibility] = useState(false);
   const [showFeelings, setShowFeelings] = useState(false);
+  const [showCheckIn, setShowCheckIn] = useState(false);
+  const [checkInDraft, setCheckInDraft] = useState('');
   const [pendingMedia, setPendingMedia] = useState<PendingMedia[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const checkInInputRef = useRef<HTMLInputElement>(null);
+  const checkInPopoverRef = useRef<HTMLDivElement>(null);
 
   const [createPost, { loading }] = useMutation(CREATE_POST, {
     update(cache, { data }) {
@@ -71,6 +75,43 @@ export function CreatePost() {
     setTimeout(() => textareaRef.current?.focus(), 50);
   }, []);
 
+  // Close the check-in popover on outside click / Escape, and autofocus its
+  // input when opened — same UX contract native prompt()/confirm() give you
+  // "for free", implemented without blocking the whole page or looking like
+  // browser chrome.
+  useEffect(() => {
+    if (!showCheckIn) return;
+    checkInInputRef.current?.focus();
+
+    const handleClickOutside = (e: MouseEvent) => {
+      if (checkInPopoverRef.current && !checkInPopoverRef.current.contains(e.target as Node)) {
+        setShowCheckIn(false);
+      }
+    };
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setShowCheckIn(false);
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('keydown', handleEscape);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleEscape);
+    };
+  }, [showCheckIn]);
+
+  const handleOpenCheckIn = useCallback(() => {
+    setCheckInDraft(location); // prefill so re-opening to edit shows the current value
+    setShowCheckIn((v) => !v);
+    if (!expanded) setExpanded(true);
+  }, [location, expanded]);
+
+  const handleConfirmCheckIn = useCallback(() => {
+    const trimmed = checkInDraft.trim();
+    if (!trimmed) return;
+    setLocation(trimmed);
+    setShowCheckIn(false);
+  }, [checkInDraft]);
+
   const handleReset = useCallback(() => {
     setContent('');
     setFeeling('');
@@ -78,6 +119,8 @@ export function CreatePost() {
     setExpanded(false);
     setShowFeelings(false);
     setShowVisibility(false);
+    setShowCheckIn(false);
+    setCheckInDraft('');
     pendingMedia.forEach((m) => URL.revokeObjectURL(m.previewUrl));
     setPendingMedia([]);
   }, [pendingMedia]);
@@ -323,16 +366,56 @@ export function CreatePost() {
             <Smile size={18} className="text-yellow-500" />
             <span className="hidden sm:inline">Feeling</span>
           </button>
-          <button
-            onClick={() => {
-              const loc = window.prompt('Enter your location:');
-              if (loc?.trim()) { setLocation(loc.trim()); if (!expanded) setExpanded(true); }
-            }}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-lg hover:bg-gray-100 dark:hover:bg-surface-dark-3 text-sm font-medium text-gray-600 dark:text-gray-300 transition-colors"
-          >
-            <MapPin size={18} className="text-red-500" />
-            <span className="hidden sm:inline">Check in</span>
-          </button>
+          <div className="relative" ref={checkInPopoverRef}>
+            <button
+              onClick={handleOpenCheckIn}
+              className={cn(
+                'flex items-center gap-1.5 px-3 py-2 rounded-lg hover:bg-gray-100 dark:hover:bg-surface-dark-3 text-sm font-medium text-gray-600 dark:text-gray-300 transition-colors',
+                showCheckIn && 'bg-gray-100 dark:bg-surface-dark-3'
+              )}
+            >
+              <MapPin size={18} className="text-red-500" />
+              <span className="hidden sm:inline">Check in</span>
+            </button>
+
+            <AnimatePresence>
+              {showCheckIn && (
+                <motion.div
+                  initial={{ opacity: 0, y: -4 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -4 }}
+                  className="absolute left-0 bottom-full mb-2 w-64 bg-white dark:bg-surface-dark-2 rounded-xl shadow-xl border border-gray-100 dark:border-gray-700 p-3 z-10"
+                >
+                  <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-2">Check in</p>
+                  <div className="flex items-center gap-2">
+                    <div className="flex-1 flex items-center gap-1.5 bg-gray-100 dark:bg-surface-dark-3 rounded-lg px-2.5 py-1.5">
+                      <MapPin size={14} className="text-red-500 flex-shrink-0" />
+                      <input
+                        ref={checkInInputRef}
+                        type="text"
+                        value={checkInDraft}
+                        onChange={(e) => setCheckInDraft(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') { e.preventDefault(); handleConfirmCheckIn(); }
+                        }}
+                        placeholder="Where are you?"
+                        maxLength={100}
+                        className="flex-1 min-w-0 bg-transparent text-sm text-gray-900 dark:text-white placeholder:text-gray-400 focus:outline-none"
+                      />
+                    </div>
+                    <button
+                      onClick={handleConfirmCheckIn}
+                      disabled={!checkInDraft.trim()}
+                      aria-label="Confirm check-in"
+                      className="flex-shrink-0 w-8 h-8 flex items-center justify-center rounded-lg bg-brand-500 hover:bg-brand-600 disabled:opacity-40 disabled:cursor-not-allowed text-white transition-colors"
+                    >
+                      <Check size={15} />
+                    </button>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
         </div>
 
         <div className="flex items-center gap-2">

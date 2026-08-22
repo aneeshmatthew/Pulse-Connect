@@ -251,6 +251,18 @@ subscription { newNotification { type message sender { fullName } } }
 
 Running log of gaps found during review, kept up to date as issues are found and fixed. Newest entries at the top.
 
+### 2026-08-21 (3) — Check-in used the browser's native `window.prompt()`
+
+**Symptom (reported by user):** Clicking "Check in" in the post composer popped up the browser's default `prompt()` dialog to ask for a location. Flagged as bad UX — native prompts can't be styled, block the main thread, look inconsistent across browsers, and don't fit the app's design language.
+
+**Root cause:** `frontend/src/components/Post/CreatePost.tsx`'s "Check in" button called `window.prompt('Enter your location:')` directly instead of using an in-app UI — a placeholder implementation that was never replaced with a real component. Everything else in the composer (Feeling picker, Visibility picker) already used custom `framer-motion` popovers; check-in was the odd one out.
+
+**Fix:** replaced it with an inline popover matching the existing Feeling/Visibility picker pattern — a small `MapPin`-icon text field with a confirm button, opened directly under the "Check in" button. It autofocuses on open, submits on Enter, closes on outside-click or Escape, and prefills with the current location when reopened to edit it. No native dialogs involved.
+
+**Files touched:** `frontend/src/components/Post/CreatePost.tsx`
+
+**Status:** ✅ Fixed, typechecked clean.
+
 ### 2026-08-21 (2) — Friend request notifications had no Accept/Decline action; Photo/Video composer button was decorative
 
 **Symptom (reported by user):** Two separate issues from the same screenshot/testing pass:
