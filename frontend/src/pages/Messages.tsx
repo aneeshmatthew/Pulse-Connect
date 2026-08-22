@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useSubscription } from '@apollo/client';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { motion } from 'framer-motion';
-import { Search, Send, Phone, Video, Info, Edit, ArrowLeft, MessageCircle } from 'lucide-react';
+import { Search, Send, Phone, Video, Info, Edit, ArrowLeft, MessageCircle, X } from 'lucide-react';
 import {
   GET_CONVERSATIONS, GET_MESSAGES, SEND_MESSAGE,
   NEW_MESSAGE_SUB, TYPING_STATUS_SUB, SET_TYPING, MARK_CONVERSATION_READ,
@@ -13,6 +13,7 @@ import { Avatar } from '@/components/UI/Avatar';
 import { AppLayout } from './Home';
 import { useAuthStore } from '@/store';
 import { formatMessageTime, timeAgo, cn } from '@/utils';
+import toast from 'react-hot-toast';
 
 export function MessagesPage() {
   const { user } = useAuthStore();
@@ -148,8 +149,13 @@ export function MessagesPage() {
     stopTyping();
     try {
       await sendMessage({ variables: { input: { conversationId: activeConvId, content } } });
-    } catch {
+    } catch (err: any) {
+      // Restoring the typed text on failure is correct, but doing it
+      // silently looks exactly like "the input didn't clear" — the text
+      // reappears with no explanation. Surface the real error so a failed
+      // send is obviously a failed send, not a mystery UI glitch.
       setText(content);
+      toast.error(err?.graphQLErrors?.[0]?.message ?? 'Message failed to send — check your connection');
     }
   }, [text, activeConvId, sending, sendMessage, stopTyping]);
 
@@ -178,9 +184,19 @@ export function MessagesPage() {
           <div className="p-4 flex-shrink-0 border-b border-gray-100 dark:border-gray-700">
             <div className="flex items-center justify-between mb-3">
               <h1 className="text-xl font-bold text-gray-900 dark:text-white">Chats</h1>
-              <button aria-label="New message" className="w-8 h-8 rounded-full bg-gray-100 dark:bg-surface-dark-3 flex items-center justify-center hover:bg-gray-200 transition-colors">
-                <Edit size={14} className="text-gray-600 dark:text-gray-300" />
-              </button>
+              <div className="flex items-center gap-1.5">
+                <button aria-label="New message" className="w-8 h-8 rounded-full bg-gray-100 dark:bg-surface-dark-3 flex items-center justify-center hover:bg-gray-200 transition-colors">
+                  <Edit size={14} className="text-gray-600 dark:text-gray-300" />
+                </button>
+                <button
+                  onClick={() => navigate('/')}
+                  aria-label="Close messages"
+                  title="Back to Home"
+                  className="w-8 h-8 rounded-full bg-gray-100 dark:bg-surface-dark-3 flex items-center justify-center hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+                >
+                  <X size={15} className="text-gray-600 dark:text-gray-300" />
+                </button>
+              </div>
             </div>
             <div className="flex items-center gap-2 bg-gray-100 dark:bg-surface-dark-3 rounded-full px-3 py-2">
               <Search size={14} className="text-gray-400" aria-hidden />

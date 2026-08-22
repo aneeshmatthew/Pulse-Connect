@@ -12,6 +12,7 @@ import { subscriptionsEnabled, POLL_INTERVAL_MS } from '@/lib/apollo';
 import { Avatar } from '@/components/UI/Avatar';
 import { useAuthStore, useUIStore } from '@/store';
 import { formatMessageTime, cn } from '@/utils';
+import toast from 'react-hot-toast';
 
 // ─── Typing dots ──────────────────────────────────────────────────────────────
 
@@ -253,8 +254,13 @@ const ChatWindow = memo(function ChatWindow({ conversationId, participant }: Cha
         const newConversationId = data?.sendMessage?.conversation?.id;
         if (newConversationId) openChat(newConversationId);
       }
-    } catch {
-      setText(content); // restore on error
+    } catch (err: any) {
+      // Restoring the typed text on failure is correct, but doing it
+      // silently looks exactly like "the input didn't clear" — the text
+      // reappears with no explanation. Surface the real error so a failed
+      // send is obviously a failed send, not a mystery UI glitch.
+      setText(content);
+      toast.error(err?.graphQLErrors?.[0]?.message ?? 'Message failed to send — check your connection');
     }
   }, [text, sending, conversationId, sendMessage, stopTyping, participant.id, openChat]);
 

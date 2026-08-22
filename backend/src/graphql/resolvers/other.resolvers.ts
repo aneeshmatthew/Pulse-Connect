@@ -190,6 +190,19 @@ export const notificationResolvers = {
       await Notification.updateMany({ recipient: user._id, isRead: false }, { isRead: true });
       return true;
     },
+
+    // Used after a friend request is accepted/declined from the
+    // notification dropdown — the request has been resolved either way, so
+    // the notification should actually disappear from the list rather than
+    // just having its buttons swapped for a status label (which only
+    // persisted in local component state and reappeared as actionable on
+    // the next refetch/reopen, since the underlying notification was never
+    // touched).
+    deleteNotification: async (_: unknown, { id }: { id: string }, { user }: GraphQLContext) => {
+      requireAuth(user);
+      const result = await Notification.deleteOne({ _id: id, recipient: user._id }); // scoped to the user
+      return result.deletedCount > 0;
+    },
   },
 
   Notification: {

@@ -280,6 +280,12 @@ export const DECLINE_FRIEND_REQUEST = gql`
   }
 `;
 
+export const DELETE_NOTIFICATION = gql`
+  mutation DeleteNotification($id: ID!) {
+    deleteNotification(id: $id)
+  }
+`;
+
 export const SEND_MESSAGE = gql`
   mutation SendMessage($input: SendMessageInput!) {
     sendMessage(input: $input) {

@@ -311,6 +311,7 @@ export const typeDefs = gql`
     # Notifications
     markNotificationRead(id: ID!): Notification!
     markAllNotificationsRead: Boolean!
+    deleteNotification(id: ID!): Boolean!
 
     # Messages
     sendMessage(input: SendMessageInput!): Message!

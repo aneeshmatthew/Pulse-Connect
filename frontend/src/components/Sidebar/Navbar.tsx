@@ -9,7 +9,7 @@ import {
 import {
   GET_NOTIFICATIONS, SEARCH_USERS,
   NEW_NOTIFICATION_SUB, MARK_ALL_NOTIFICATIONS_READ,
-  ACCEPT_FRIEND_REQUEST, DECLINE_FRIEND_REQUEST,
+  ACCEPT_FRIEND_REQUEST, DECLINE_FRIEND_REQUEST, DELETE_NOTIFICATION,
 } from '@/lib/graphql';
 import { subscriptionsEnabled } from '@/lib/apollo';
 import { Avatar } from '@/components/UI/Avatar';
@@ -62,10 +62,17 @@ export function Navbar() {
   const [handledRequests, setHandledRequests] = useState<Record<string, 'accepted' | 'declined'>>({});
   const [actioningId, setActioningId] = useState<string | null>(null);
 
-  const [acceptFriendRequest] = useMutation(ACCEPT_FRIEND_REQUEST, {
-    refetchQueries: [GET_NOTIFICATIONS],
-  });
-  const [declineFriendRequest] = useMutation(DECLINE_FRIEND_REQUEST, {
+  const [acceptFriendRequest] = useMutation(ACCEPT_FRIEND_REQUEST);
+  const [declineFriendRequest] = useMutation(DECLINE_FRIEND_REQUEST);
+  // Actually removes the notification server-side once a friend request has
+  // been resolved. Previously accept/decline only swapped the buttons for a
+  // status label in local component state — the underlying notification was
+  // never touched, so it silently reappeared (still unread, still showing
+  // Confirm/Delete) the next time GET_NOTIFICATIONS refetched or the
+  // dropdown was reopened. This is the actual fix for that; the local
+  // `handledRequests` state below now only covers the brief moment between
+  // clicking and the delete+refetch completing.
+  const [deleteNotification] = useMutation(DELETE_NOTIFICATION, {
     refetchQueries: [GET_NOTIFICATIONS],
   });
 
@@ -75,24 +82,26 @@ export function Navbar() {
       await acceptFriendRequest({ variables: { userId: senderId } });
       setHandledRequests((prev) => ({ ...prev, [notifId]: 'accepted' }));
       toast.success('Friend request accepted! 🎉');
+      await deleteNotification({ variables: { id: notifId } });
     } catch (err: any) {
       toast.error(err?.graphQLErrors?.[0]?.message ?? 'Failed to accept request');
     } finally {
       setActioningId(null);
     }
-  }, [acceptFriendRequest]);
+  }, [acceptFriendRequest, deleteNotification]);
 
   const handleDeclineRequest = useCallback(async (notifId: string, senderId: string) => {
     setActioningId(notifId);
     try {
       await declineFriendRequest({ variables: { userId: senderId } });
       setHandledRequests((prev) => ({ ...prev, [notifId]: 'declined' }));
+      await deleteNotification({ variables: { id: notifId } });
     } catch (err: any) {
       toast.error(err?.graphQLErrors?.[0]?.message ?? 'Failed to decline request');
     } finally {
       setActioningId(null);
     }
-  }, [declineFriendRequest]);
+  }, [declineFriendRequest, deleteNotification]);
 
   // Not polling this for now (out of current scope — Feed + Chat only).
   // GET_NOTIFICATIONS above still refreshes on its own triggers (mount,
