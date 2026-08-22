@@ -1,9 +1,20 @@
 import type { IncomingMessage, ServerResponse } from 'http';
 import { getApp } from './_app';
 
-// Catch-all Vercel serverless function: every request under /api/* (and,
-// via the rewrites in vercel.json, /graphql + /health too) is routed
-// through the same Express + Apollo Server instance.
+// Single, statically-named Vercel serverless function. Every request under
+// /api/* (and, via the rewrites below, /graphql + /health too) is routed
+// here — see vercel.json's "/api/:path*" rewrite for why this file isn't
+// named "[...path].ts" anymore.
+//
+// Multi-segment catch-all note: Vercel's bracket-filename catch-all
+// convention (e.g. api/[...path].ts) only reliably matches SINGLE path
+// segments for plain Node.js serverless functions (i.e. projects not using
+// the Next.js framework) — this is a documented Vercel platform behavior,
+// not a bug in this code. That's exactly why /api/health (one segment)
+// used to work while /api/upload/signature (two segments) 404'd before
+// ever reaching this file. Routing every /api/* request here via an
+// explicit rewrite (rather than relying on the filename convention) is
+// the fix Vercel's own team recommends for this case.
 export default async function handler(req: IncomingMessage, res: ServerResponse) {
   try {
     const app = await getApp();
