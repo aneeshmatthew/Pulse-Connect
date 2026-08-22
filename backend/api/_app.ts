@@ -68,13 +68,13 @@ async function buildApp(): Promise<Express> {
     .split(',')
     .map((s) => s.trim());
 
+  const isOriginAllowed = (origin?: string | null): boolean =>
+    !origin || (isDev && origin.startsWith('http://localhost:')) || allowedOrigins.includes(origin);
+
   app.use(
     cors({
       origin: (origin, callback) => {
-        // Allow requests with no origin (curl, server-to-server, health checks).
-        if (!origin) return callback(null, true);
-        if (isDev && origin.startsWith('http://localhost:')) return callback(null, true);
-        if (allowedOrigins.includes(origin)) return callback(null, true);
+        if (isOriginAllowed(origin)) return callback(null, true);
         callback(new Error(`CORS blocked: ${origin}`));
       },
       credentials: true,
@@ -98,8 +98,31 @@ async function buildApp(): Promise<Express> {
   app.use('/api', uploadRouter);
 
   // Global error handler.
-  app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
+  //
+  // IMPORTANT: when cors()'s origin callback above rejects a request (or
+  // any other error happens on an already-CORS-approved request), Express
+  // routes it straight here — *skipping* the cors() middleware's normal
+  // header-setting logic. Without re-adding the header here, EVERY error
+  // response (not just origin rejections) goes out with no
+  // Access-Control-Allow-Origin header, and the browser reports it as a
+  // CORS failure — hiding whatever the real error was. This previously
+  // caused confusing "blocked by CORS policy" errors for failures that had
+  // nothing to do with CORS. Re-apply the same allow/deny decision here so:
+  //   - a legitimately-allowed origin still sees the real error (500 body,
+  //     visible in the network tab) instead of a misleading CORS block.
+  //   - a genuinely disallowed origin still gets blocked (no header set),
+  //     but the server log below makes it obvious *why*, instead of
+  //     someone chasing a phantom "CORS misconfigured" bug when the origin
+  //     really is just wrong.
+  app.use((err: Error, req: Request, res: Response, _next: NextFunction) => {
     console.error('[Express error]', err.message);
+    const origin = req.headers.origin;
+    if (isOriginAllowed(origin)) {
+      if (origin) res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
+    } else {
+      console.error(`[CORS] Rejected origin: ${origin}. Allowed origins: ${allowedOrigins.join(', ')}`);
+    }
     res.status(500).json({ error: isDev ? err.message : 'Internal server error' });
   });
 

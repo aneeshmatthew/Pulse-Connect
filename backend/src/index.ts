@@ -93,13 +93,12 @@ async function bootstrap() {
     .split(',')
     .map(s => s.trim());
 
+  const isOriginAllowed = (origin?: string | null): boolean =>
+    !origin || (isDev && origin.startsWith('http://localhost:')) || allowedOrigins.includes(origin);
+
   app.use(cors({
     origin: (origin, callback) => {
-      // Allow requests with no origin (mobile apps, curl, etc.)
-      if (!origin) return callback(null, true);
-      // Allow all localhost origins in development for local static serve + Vite dev.
-      if (isDev && origin.startsWith('http://localhost:')) return callback(null, true);
-      if (allowedOrigins.includes(origin)) return callback(null, true);
+      if (isOriginAllowed(origin)) return callback(null, true);
       callback(new Error(`CORS blocked: ${origin}`));
     },
     credentials: true,
@@ -124,8 +123,19 @@ async function bootstrap() {
   });
 
   // ── Global error handler (catches unhandled sync Express errors) ──────────
-  app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
+  // See the matching comment in api/_app.ts — without re-applying the CORS
+  // decision here, error responses (including cors()'s own origin
+  // rejections) go out with no Access-Control-Allow-Origin header, and the
+  // browser reports it as a CORS failure regardless of what actually failed.
+  app.use((err: Error, req: Request, res: Response, _next: NextFunction) => {
     console.error('[Express error]', err.message);
+    const origin = req.headers.origin;
+    if (isOriginAllowed(origin)) {
+      if (origin) res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
+    } else {
+      console.error(`[CORS] Rejected origin: ${origin}. Allowed origins: ${allowedOrigins.join(', ')}`);
+    }
     res.status(500).json({ error: isDev ? err.message : 'Internal server error' });
   });
 
