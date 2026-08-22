@@ -73,6 +73,17 @@ async function bootstrap() {
       },
     ],
     formatError: (formattedError, error) => {
+      // Always log the FULL original error server-side (message + stack),
+      // regardless of environment — see the matching comment in
+      // api/_app.ts for why this matters (previously silent in production).
+      const original = (error as any)?.originalError ?? error;
+      console.error('[GraphQL Error]', {
+        message: original?.message ?? formattedError.message,
+        path: formattedError.path,
+        code: formattedError.extensions?.code,
+        stack: original?.stack,
+      });
+
       // Don't leak internal error details in production
       if (!isDev) {
         const code = formattedError.extensions?.code;
@@ -81,7 +92,6 @@ async function bootstrap() {
           return { message: 'Internal server error', extensions: { code: 'INTERNAL_SERVER_ERROR' } };
         }
       }
-      if (isDev) console.error('[GraphQL Error]', formattedError.message);
       return formattedError;
     },
   });

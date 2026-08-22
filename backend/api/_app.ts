@@ -48,6 +48,22 @@ async function buildApp(): Promise<Express> {
       ...(!isDev ? [ApolloServerPluginLandingPageDisabled()] : []),
     ],
     formatError: (formattedError, error) => {
+      // Always log the FULL original error server-side (message + stack),
+      // regardless of environment. Previously this only logged in dev —
+      // meaning in production, an unexpected resolver exception was masked
+      // to "Internal server error" for the client AND never logged
+      // anywhere at all, making it look like the request just silently
+      // misbehaved with zero trace to debug from. This is why a real
+      // backend exception could go unnoticed through several rounds of
+      // testing: nothing in Vercel's logs ever pointed at it.
+      const original = (error as any)?.originalError ?? error;
+      console.error('[GraphQL Error]', {
+        message: original?.message ?? formattedError.message,
+        path: formattedError.path,
+        code: formattedError.extensions?.code,
+        stack: original?.stack,
+      });
+
       if (!isDev) {
         const code = formattedError.extensions?.code;
         const safeErrors = ['UNAUTHENTICATED', 'FORBIDDEN', 'BAD_USER_INPUT', 'NOT_FOUND'];
@@ -55,7 +71,6 @@ async function buildApp(): Promise<Express> {
           return { message: 'Internal server error', extensions: { code: 'INTERNAL_SERVER_ERROR' } };
         }
       }
-      if (isDev) console.error('[GraphQL Error]', formattedError.message);
       return formattedError;
     },
   });
