@@ -280,6 +280,17 @@ export const messageResolvers = {
     // Redact content of deleted messages at resolver level
     content: (parent: any) => (parent.isDeleted ? '' : parent.content),
 
+    // Defensive guard against exactly the bug fixed in models/Message.ts:
+    // any message created before that fix has `media` stored in the
+    // database as `{ url: undefined, type: undefined, ... }` instead of
+    // truly absent, which throws "Cannot return null for non-nullable
+    // field MessageMedia.url" the moment it's queried. Treat a media
+    // object with no url as "no media" rather than letting it reach the
+    // MessageMedia.url: String! field and blow up the whole response —
+    // this is what's needed for pre-existing messages to stop erroring
+    // without a database migration.
+    media: (parent: any) => (parent.media?.url ? parent.media : null),
+
     // `Message.conversation` is populated by the query resolvers above
     // when they need it, but `sendMessage`'s return value never populated
     // it. The frontend needs it to learn the new conversation's id right

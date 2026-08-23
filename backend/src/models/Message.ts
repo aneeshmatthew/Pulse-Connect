@@ -35,11 +35,22 @@ const messageSchema = new Schema<IMessage>(
     conversation: { type: Schema.Types.ObjectId, ref: 'Conversation', required: true },
     sender: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     content: { type: String, maxlength: 20000, default: '' },
+    // Mongoose defaults single-nested subdocuments (the `{ url: String, ... }`
+    // shorthand below) to an empty object `{}` on every document, even when
+    // `media` is never set — so a plain text message ends up with
+    // `media: { url: undefined, ... }` instead of `media: undefined`. GraphQL
+    // then sees a real (non-null) `media` object and throws trying to resolve
+    // `MessageMedia.url: String!` against `undefined`. Wrapping it as an
+    // explicit sub-schema with `default: undefined` is the standard fix —
+    // it stops Mongoose from auto-instantiating the empty object at all.
     media: {
-      url: String,
-      type: { type: String, enum: ['image', 'video', 'file'] },
-      name: String,
-      size: Number,
+      type: new Schema({
+        url: String,
+        type: { type: String, enum: ['image', 'video', 'file'] },
+        name: String,
+        size: Number,
+      }, { _id: false }),
+      default: undefined,
     },
     reactions: [{
       user: { type: Schema.Types.ObjectId, ref: 'User' },
