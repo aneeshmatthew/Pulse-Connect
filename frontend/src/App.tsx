@@ -10,6 +10,7 @@ import { ProfilePage } from '@/pages/Profile';
 import { MessagesPage } from '@/pages/Messages';
 import { ComingSoonPage } from '@/pages/ComingSoon';
 import { FriendsPage } from '@/pages/Friends';
+import { PostDetailPage } from '@/pages/PostDetail';
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated } = useAuthStore();
@@ -33,6 +34,7 @@ export default function App() {
           <Route path="/messages"          element={<PrivateRoute><MessagesPage /></PrivateRoute>} />
           <Route path="/messages/:conversationId" element={<PrivateRoute><MessagesPage /></PrivateRoute>} />
           <Route path="/friends" element={<PrivateRoute><FriendsPage /></PrivateRoute>} />
+          <Route path="/post/:id" element={<PrivateRoute><PostDetailPage /></PrivateRoute>} />
           <Route path="/watch" element={<PrivateRoute>
             <ComingSoonPage icon={PlaySquare} title="Watch" description="Video feed and reels are coming soon — check back later." />
           </PrivateRoute>} />

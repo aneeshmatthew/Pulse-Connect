@@ -355,6 +355,12 @@ export const MARK_ALL_NOTIFICATIONS_READ = gql`
   }
 `;
 
+export const MARK_NOTIFICATION_READ = gql`
+  mutation MarkNotificationRead($id: ID!) {
+    markNotificationRead(id: $id) { id isRead }
+  }
+`;
+
 export const UPDATE_PROFILE = gql`
   mutation UpdateProfile($input: UpdateProfileInput!) {
     updateProfile(input: $input) { ...UserFields bio location website }

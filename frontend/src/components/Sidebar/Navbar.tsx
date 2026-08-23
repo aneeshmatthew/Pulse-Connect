@@ -8,7 +8,7 @@ import {
 } from 'lucide-react';
 import {
   GET_NOTIFICATIONS, SEARCH_USERS,
-  NEW_NOTIFICATION_SUB, MARK_ALL_NOTIFICATIONS_READ,
+  NEW_NOTIFICATION_SUB, MARK_ALL_NOTIFICATIONS_READ, MARK_NOTIFICATION_READ,
   ACCEPT_FRIEND_REQUEST, DECLINE_FRIEND_REQUEST, DELETE_NOTIFICATION,
 } from '@/lib/graphql';
 import { subscriptionsEnabled } from '@/lib/apollo';
@@ -75,6 +75,24 @@ export function Navbar() {
   const [deleteNotification] = useMutation(DELETE_NOTIFICATION, {
     refetchQueries: [GET_NOTIFICATIONS],
   });
+
+  const [markNotificationRead] = useMutation(MARK_NOTIFICATION_READ);
+
+  const handleNotificationClick = useCallback((n: any) => {
+    if (!n.isRead) markNotificationRead({ variables: { id: n.id } });
+    setShowNotifs(false);
+
+    if (n.type === 'FRIEND_REQUEST' || n.type === 'FRIEND_ACCEPT') {
+      navigate(`/profile/${n.sender.username}`);
+    } else if (n.entityType === 'post' && n.entityId) {
+      navigate(`/post/${n.entityId}`);
+    } else {
+      // No page exists yet for this notification type (e.g. STORY_VIEW,
+      // MESSAGE) — falling back to the sender's profile beats doing
+      // nothing at all.
+      navigate(`/profile/${n.sender.username}`);
+    }
+  }, [markNotificationRead, navigate]);
 
   const handleAcceptRequest = useCallback(async (notifId: string, senderId: string) => {
     setActioningId(notifId);
@@ -326,8 +344,9 @@ export function Navbar() {
                       return (
                         <li
                           key={n.id}
+                          onClick={() => handleNotificationClick(n)}
                           className={cn(
-                            'flex items-start gap-3 px-4 py-3 hover:bg-gray-50 dark:hover:bg-surface-dark-3 transition-colors',
+                            'flex items-start gap-3 px-4 py-3 hover:bg-gray-50 dark:hover:bg-surface-dark-3 transition-colors cursor-pointer',
                             !n.isRead && 'bg-blue-50/60 dark:bg-blue-900/10'
                           )}
                         >

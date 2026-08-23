@@ -42,12 +42,17 @@ interface Post {
 
 interface PostCardProps {
   post: Post;
+  // Auto-expands the comment thread on mount — used by the single-post
+  // detail page (arrived at via a POST_LIKE/POST_COMMENT notification,
+  // where the person almost certainly wants to see the comment right
+  // away rather than click "Comment" again to reveal what they came for).
+  initiallyExpanded?: boolean;
 }
 
 // Memoized so virtual-list siblings don't re-render when one post changes
-const PostCard = memo(function PostCard({ post }: PostCardProps) {
+const PostCard = memo(function PostCard({ post, initiallyExpanded = false }: PostCardProps) {
   const { user } = useAuthStore();
-  const [showComments, setShowComments] = useState(false);
+  const [showComments, setShowComments] = useState(initiallyExpanded);
   const [showReactions, setShowReactions] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
