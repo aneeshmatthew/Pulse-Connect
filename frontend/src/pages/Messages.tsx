@@ -1,11 +1,11 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { useQuery, useMutation, useSubscription } from '@apollo/client';
+import { useQuery, useLazyQuery, useMutation, useSubscription } from '@apollo/client';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import { Search, Send, Phone, Video, Info, Edit, ArrowLeft, MessageCircle, X } from 'lucide-react';
 import {
-  GET_CONVERSATIONS, GET_MESSAGES, SEND_MESSAGE,
+  GET_CONVERSATIONS, GET_MESSAGES, SEND_MESSAGE, SEARCH_USERS,
   NEW_MESSAGE_SUB, TYPING_STATUS_SUB, SET_TYPING, MARK_CONVERSATION_READ,
 } from '@/lib/graphql';
 import { subscriptionsEnabled, POLL_INTERVAL_MS } from '@/lib/apollo';
@@ -21,13 +21,21 @@ export function MessagesPage() {
   const navigate = useNavigate();
 
   const [activeConvId, setActiveConvId] = useState<string | null>(paramConvId ?? null);
+  // Set when starting a message with someone you don't have a conversation
+  // with yet — same "pending" concept as the floating chat popup
+  // (components/Chat/ChatPanel.tsx). No conversationId exists until the
+  // first message is actually sent.
+  const [pendingRecipient, setPendingRecipient] = useState<any | null>(null);
   const [text, setText] = useState('');
   const [otherTyping, setOtherTyping] = useState(false);
   const [searchText, setSearchText] = useState('');
+  const [showNewMessage, setShowNewMessage] = useState(false);
+  const [newMsgSearch, setNewMsgSearch] = useState('');
 
   const parentRef = useRef<HTMLDivElement>(null);
   const typingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isTypingRef = useRef(false);
+  const newMessagePopoverRef = useRef<HTMLDivElement>(null);
 
   const { data: convsData } = useQuery(GET_CONVERSATIONS, {
     skip: !user,
@@ -91,6 +99,33 @@ export function MessagesPage() {
     },
   });
 
+  const [searchUsers, { data: userSearchData, loading: userSearchLoading }] = useLazyQuery(SEARCH_USERS);
+
+  // Debounced user search for the "New message" popover
+  useEffect(() => {
+    const q = newMsgSearch.trim();
+    if (q.length < 2) return;
+    const t = setTimeout(() => searchUsers({ variables: { query: q } }), 300);
+    return () => clearTimeout(t);
+  }, [newMsgSearch, searchUsers]);
+
+  // Close the "New message" popover on outside click / Escape
+  useEffect(() => {
+    if (!showNewMessage) return;
+    const handleClick = (e: MouseEvent) => {
+      if (newMessagePopoverRef.current && !newMessagePopoverRef.current.contains(e.target as Node)) {
+        setShowNewMessage(false);
+      }
+    };
+    const handleEscape = (e: KeyboardEvent) => { if (e.key === 'Escape') setShowNewMessage(false); };
+    document.addEventListener('mousedown', handleClick);
+    document.addEventListener('keydown', handleEscape);
+    return () => {
+      document.removeEventListener('mousedown', handleClick);
+      document.removeEventListener('keydown', handleEscape);
+    };
+  }, [showNewMessage]);
+
   // Mark as read when entering conversation
   useEffect(() => {
     if (activeConvId) markRead({ variables: { conversationId: activeConvId } });
@@ -102,7 +137,8 @@ export function MessagesPage() {
   // ✅ Fix: find OTHER participant using user.id
   const activeConv = conversations.find((c: any) => c.id === activeConvId);
   const otherParticipant = activeConv?.participants?.find((p: any) => p.id !== user?.id)
-    ?? activeConv?.participants?.[0];
+    ?? activeConv?.participants?.[0]
+    ?? pendingRecipient; // starting a new conversation — no activeConv exists yet
 
   const rowVirtualizer = useVirtualizer({
     count: messages.length + (otherTyping ? 1 : 0),
@@ -144,11 +180,25 @@ export function MessagesPage() {
 
   const handleSend = useCallback(async () => {
     const content = text.trim();
-    if (!content || !activeConvId || sending) return;
+    if (!content || (!activeConvId && !pendingRecipient) || sending) return;
     setText('');
     stopTyping();
     try {
-      await sendMessage({ variables: { input: { conversationId: activeConvId, content } } });
+      const { data } = await sendMessage({
+        variables: {
+          input: activeConvId
+            ? { conversationId: activeConvId, content }
+            : { recipientId: pendingRecipient.id, content }, // first message — server creates the conversation
+        },
+      });
+      if (!activeConvId) {
+        // Promote from "pending" to a real conversation now that one exists.
+        const newConversationId = data?.sendMessage?.conversation?.id;
+        if (newConversationId) {
+          setActiveConvId(newConversationId);
+          setPendingRecipient(null);
+        }
+      }
     } catch (err: any) {
       // Restoring the typed text on failure is correct, but doing it
       // silently looks exactly like "the input didn't clear" — the text
@@ -157,13 +207,33 @@ export function MessagesPage() {
       setText(content);
       toast.error(err?.graphQLErrors?.[0]?.message ?? 'Message failed to send — check your connection');
     }
-  }, [text, activeConvId, sending, sendMessage, stopTyping]);
+  }, [text, activeConvId, pendingRecipient, sending, sendMessage, stopTyping]);
 
   const handleSelectConv = useCallback((id: string) => {
     setActiveConvId(id);
+    setPendingRecipient(null);
     setOtherTyping(false);
     setText('');
   }, []);
+
+  const handleStartNewMessage = useCallback((recipient: any) => {
+    // If a conversation with this person already exists, just open it —
+    // don't create a duplicate. `conversations` is already loaded via
+    // GET_CONVERSATIONS, so this is a plain client-side lookup.
+    const existing = conversations.find((c: any) =>
+      c.participants?.some((p: any) => p.id === recipient.id)
+    );
+    if (existing) {
+      handleSelectConv(existing.id);
+    } else {
+      setActiveConvId(null);
+      setPendingRecipient(recipient);
+      setOtherTyping(false);
+      setText('');
+    }
+    setShowNewMessage(false);
+    setNewMsgSearch('');
+  }, [conversations, handleSelectConv]);
 
   const filteredConvs = conversations.filter((c: any) => {
     if (!searchText.trim()) return true;
@@ -185,9 +255,73 @@ export function MessagesPage() {
             <div className="flex items-center justify-between mb-3">
               <h1 className="text-xl font-bold text-gray-900 dark:text-white">Chats</h1>
               <div className="flex items-center gap-1.5">
-                <button aria-label="New message" className="w-8 h-8 rounded-full bg-gray-100 dark:bg-surface-dark-3 flex items-center justify-center hover:bg-gray-200 transition-colors">
-                  <Edit size={14} className="text-gray-600 dark:text-gray-300" />
-                </button>
+                <div className="relative" ref={newMessagePopoverRef}>
+                  <button
+                    onClick={() => setShowNewMessage((v) => !v)}
+                    aria-label="New message"
+                    className={cn(
+                      'w-8 h-8 rounded-full flex items-center justify-center transition-colors',
+                      showNewMessage
+                        ? 'bg-brand-500 text-white'
+                        : 'bg-gray-100 dark:bg-surface-dark-3 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
+                    )}
+                  >
+                    <Edit size={14} />
+                  </button>
+
+                  <AnimatePresence>
+                    {showNewMessage && (
+                      <motion.div
+                        initial={{ opacity: 0, y: -4 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -4 }}
+                        transition={{ duration: 0.12 }}
+                        className="absolute top-full right-0 mt-2 w-72 bg-white dark:bg-surface-dark-2 rounded-xl shadow-2xl border border-gray-100 dark:border-gray-700 overflow-hidden z-50"
+                      >
+                        <div className="p-3 border-b border-gray-100 dark:border-gray-700">
+                          <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-2">New message</p>
+                          <div className="flex items-center gap-2 bg-gray-100 dark:bg-surface-dark-3 rounded-full px-3 py-2">
+                            <Search size={14} className="text-gray-400 flex-shrink-0" aria-hidden />
+                            <input
+                              autoFocus
+                              value={newMsgSearch}
+                              onChange={(e) => setNewMsgSearch(e.target.value)}
+                              placeholder="Search people…"
+                              className="bg-transparent text-sm outline-none text-gray-900 dark:text-white placeholder:text-gray-400 w-full"
+                            />
+                          </div>
+                        </div>
+                        <div className="max-h-72 overflow-y-auto">
+                          {newMsgSearch.trim().length < 2 && (
+                            <p className="px-4 py-4 text-sm text-gray-400 text-center">Type at least 2 characters</p>
+                          )}
+                          {newMsgSearch.trim().length >= 2 && userSearchLoading && (
+                            <p className="px-4 py-4 text-sm text-gray-400 text-center">Searching…</p>
+                          )}
+                          {newMsgSearch.trim().length >= 2 && !userSearchLoading && (userSearchData?.searchUsers ?? []).length === 0 && (
+                            <p className="px-4 py-4 text-sm text-gray-400 text-center">No results for "{newMsgSearch}"</p>
+                          )}
+                          {(userSearchData?.searchUsers ?? [])
+                            .filter((u: any) => u.id !== user?.id)
+                            .map((u: any) => (
+                              <button
+                                key={u.id}
+                                onClick={() => handleStartNewMessage(u)}
+                                className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50 dark:hover:bg-surface-dark-3 transition-colors text-left"
+                              >
+                                <Avatar src={u.avatar} name={u.fullName} size="sm" isOnline={u.isOnline} />
+                                <div className="min-w-0">
+                                  <p className="text-sm font-semibold text-gray-900 dark:text-white truncate">{u.fullName}</p>
+                                  <p className="text-xs text-gray-400 truncate">@{u.username}</p>
+                                </div>
+                              </button>
+                            ))}
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+
                 <button
                   onClick={() => navigate('/')}
                   aria-label="Close messages"
@@ -261,12 +395,12 @@ export function MessagesPage() {
         </div>
 
         {/* ── Chat area ───────────────────────────────────────────────── */}
-        {activeConvId && otherParticipant ? (
+        {(activeConvId || pendingRecipient) && otherParticipant ? (
           <div className="flex-1 flex flex-col min-w-0">
             {/* Header */}
             <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-100 dark:border-gray-700 flex-shrink-0">
               <button
-                onClick={() => setActiveConvId(null)}
+                onClick={() => { setActiveConvId(null); setPendingRecipient(null); }}
                 className="md:hidden text-brand-500 mr-1"
                 aria-label="Back to conversations"
               >
