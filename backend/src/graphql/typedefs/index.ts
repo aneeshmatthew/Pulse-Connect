@@ -38,6 +38,11 @@ export const typeDefs = gql`
     createdAt: DateTime!
   }
 
+  type FriendRequest {
+    from: User!
+    sentAt: DateTime!
+  }
+
   type Media {
     url: String!
     type: MediaType!
@@ -234,6 +239,15 @@ export const typeDefs = gql`
     user(id: ID, username: String): User
     searchUsers(query: String!, limit: Int): [User!]!
     suggestedFriends(limit: Int): [User!]!
+    # Incoming friend requests for the current user — backs the Friends
+    # page's "Requests" tab. Previously the only way to see a friend
+    # request at all was the notification dropdown; this exposes the
+    # underlying data (already stored on User.friendRequests) directly.
+    friendRequests: [FriendRequest!]!
+    # Outgoing friend requests the current user has sent but not yet had
+    # accepted/declined — backs the "Sent" sub-view, pairs with
+    # cancelFriendRequest below.
+    sentFriendRequests: [User!]!
 
     # Feed
     feed(cursor: String, limit: Int): FeedConnection!
@@ -282,6 +296,11 @@ export const typeDefs = gql`
     sendFriendRequest(userId: ID!): User!
     acceptFriendRequest(userId: ID!): User!
     declineFriendRequest(userId: ID!): Boolean!
+    # Withdraws a request the CURRENT user sent — userId is the recipient.
+    # Distinct from declineFriendRequest, which only removes a request from
+    # the *caller's own* incoming list (i.e. only the recipient can call
+    # that one); there was previously no way for the sender to cancel.
+    cancelFriendRequest(userId: ID!): Boolean!
     removeFriend(userId: ID!): Boolean!
     followUser(userId: ID!): User!
     unfollowUser(userId: ID!): User!

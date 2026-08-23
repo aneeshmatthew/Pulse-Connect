@@ -47,6 +47,34 @@ export const userResolvers = {
         .limit(safeLimit)
         .lean();
     },
+
+    // Current user's incoming pending friend requests, with sender details
+    // populated and sorted newest-first — backs the Friends page.
+    friendRequests: async (_: unknown, __: unknown, { user }: GraphQLContext) => {
+      requireAuth(user);
+      const fresh = await User.findById(user._id).select('friendRequests').lean();
+      const requests = (fresh?.friendRequests ?? []) as any[];
+      if (!requests.length) return [];
+
+      const senders = await User.find({ _id: { $in: requests.map((r) => r.from) } })
+        .select('-password')
+        .lean();
+      const byId = new Map(senders.map((s: any) => [s._id.toString(), s]));
+
+      return requests
+        .map((r) => ({ from: byId.get(r.from.toString()), sentAt: r.sentAt }))
+        .filter((r) => r.from) // drop requests from since-deleted accounts
+        .sort((a, b) => new Date(b.sentAt).getTime() - new Date(a.sentAt).getTime());
+    },
+
+    // Users the current user has sent a still-pending request to — the
+    // "Sent" side of the same feature, pairs with cancelFriendRequest.
+    sentFriendRequests: async (_: unknown, __: unknown, { user }: GraphQLContext) => {
+      requireAuth(user);
+      return User.find({ 'friendRequests.from': user._id })
+        .select('-password')
+        .lean();
+    },
   },
 
   Mutation: {
@@ -126,6 +154,18 @@ export const userResolvers = {
       requireAuth(user);
       await User.findByIdAndUpdate(user._id, {
         $pull: { friendRequests: { from: userId } },
+      });
+      return true;
+    },
+
+    // Withdraws a request the CURRENT user sent to `userId` (the recipient).
+    // declineFriendRequest only ever touches the caller's OWN incoming
+    // list, so it can't be reused here — the caller is the sender in this
+    // case, and needs to remove themselves from the RECIPIENT's list instead.
+    cancelFriendRequest: async (_: unknown, { userId }: { userId: string }, { user }: GraphQLContext) => {
+      requireAuth(user);
+      await User.findByIdAndUpdate(userId, {
+        $pull: { friendRequests: { from: user._id } },
       });
       return true;
     },

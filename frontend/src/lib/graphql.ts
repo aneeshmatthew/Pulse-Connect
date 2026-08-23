@@ -158,6 +158,35 @@ export const GET_SUGGESTED_FRIENDS = gql`
   ${USER_FIELDS}
 `;
 
+export const GET_FRIEND_REQUESTS = gql`
+  query GetFriendRequests {
+    friendRequests {
+      sentAt
+      from { ...UserFields bio location }
+    }
+  }
+  ${USER_FIELDS}
+`;
+
+export const GET_SENT_FRIEND_REQUESTS = gql`
+  query GetSentFriendRequests {
+    sentFriendRequests { ...UserFields }
+  }
+  ${USER_FIELDS}
+`;
+
+export const CANCEL_FRIEND_REQUEST = gql`
+  mutation CancelFriendRequest($userId: ID!) {
+    cancelFriendRequest(userId: $userId)
+  }
+`;
+
+export const REMOVE_FRIEND = gql`
+  mutation RemoveFriend($userId: ID!) {
+    removeFriend(userId: $userId)
+  }
+`;
+
 export const GET_NOTIFICATIONS = gql`
   query GetNotifications($limit: Int, $offset: Int) {
     notifications(limit: $limit, offset: $offset) {
