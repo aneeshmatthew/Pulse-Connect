@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback, memo } from 'react';
+import React, { useState, useRef, useCallback, useEffect, memo } from 'react';
 import { Link } from 'react-router-dom';
 import { useMutation } from '@apollo/client';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -100,12 +100,23 @@ const PostCard = memo(function PostCard({ post, initiallyExpanded = false }: Pos
   }, [deletePost, post.id]);
 
   const onReactionEnter = useCallback(() => {
+    // Always clear whatever's pending first — this is what makes hover
+    // reliable in both directions. Previously the hide-timeout below was
+    // never stored anywhere, so nothing could ever cancel it: moving the
+    // mouse from the Like button toward the picker (crossing the small
+    // gap between them) started an uncancelable countdown to close, so
+    // the picker could vanish before the pointer even reached it.
+    if (reactionTimer.current) clearTimeout(reactionTimer.current);
     reactionTimer.current = setTimeout(() => setShowReactions(true), 500);
   }, []);
 
   const onReactionLeave = useCallback(() => {
     if (reactionTimer.current) clearTimeout(reactionTimer.current);
-    setTimeout(() => setShowReactions(false), 300);
+    reactionTimer.current = setTimeout(() => setShowReactions(false), 400);
+  }, []);
+
+  useEffect(() => () => {
+    if (reactionTimer.current) clearTimeout(reactionTimer.current);
   }, []);
 
   const visibilityIcon =
@@ -335,8 +346,8 @@ const PostCard = memo(function PostCard({ post, initiallyExpanded = false }: Pos
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 exit={{ opacity: 0, y: 6, scale: 0.92 }}
                 transition={{ duration: 0.15 }}
-                onMouseEnter={() => reactionTimer.current && clearTimeout(reactionTimer.current)}
-                onMouseLeave={() => setShowReactions(false)}
+                onMouseEnter={() => { if (reactionTimer.current) clearTimeout(reactionTimer.current); }}
+                onMouseLeave={onReactionLeave}
                 role="dialog"
                 aria-label="Reaction picker"
                 className="absolute bottom-full left-0 mb-2 bg-white dark:bg-surface-dark-2 rounded-full shadow-2xl border border-gray-200 dark:border-gray-700 px-3 py-2 flex items-center gap-1 z-30"

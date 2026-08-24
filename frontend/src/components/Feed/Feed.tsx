@@ -35,7 +35,10 @@ export function Feed() {
     onData: () => setHasNewPosts(true),
   });
 
-  const posts: any[] = data?.feed?.posts ?? [];
+  // See the matching comment in Profile.tsx — filters out cache entries
+  // evicted by a delete that happened elsewhere (e.g. the Photos tab)
+  // without this list being re-fetched.
+  const posts: any[] = (data?.feed?.posts ?? []).filter(Boolean);
   const latestPostId: string | undefined = posts[0]?.id;
 
   // Polling fallback for deployments without subscriptions (e.g. Vercel):

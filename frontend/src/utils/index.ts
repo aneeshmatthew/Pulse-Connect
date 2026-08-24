@@ -72,6 +72,8 @@ interface UploadSignature {
   signature: string;
   timestamp: number;
   folder: string;
+  allowedFormats: string;
+  maxFileSize: number;
   apiKey: string;
   cloudName: string;
 }
@@ -90,7 +92,7 @@ async function getUploadSignature(): Promise<UploadSignature> {
 }
 
 export async function uploadMedia(file: File): Promise<UploadedMedia> {
-  const { signature, timestamp, folder, apiKey, cloudName } = await getUploadSignature();
+  const { signature, timestamp, folder, allowedFormats, maxFileSize, apiKey, cloudName } = await getUploadSignature();
 
   const formData = new FormData();
   formData.append('file', file);
@@ -98,6 +100,12 @@ export async function uploadMedia(file: File): Promise<UploadedMedia> {
   formData.append('timestamp', String(timestamp));
   formData.append('signature', signature);
   formData.append('folder', folder);
+  // Every one of these must exactly match what the backend signed, or
+  // Cloudinary rejects the upload as tampered — that's what makes this
+  // real server-side enforcement rather than a client-side-only check:
+  // altering either value here without a matching signature just fails.
+  formData.append('allowed_formats', allowedFormats);
+  formData.append('max_file_size', String(maxFileSize));
 
   // 'auto' lets Cloudinary accept either images or videos on the same
   // endpoint and pick the right resource_type itself.

@@ -15,7 +15,19 @@ import { cloudinary, cloudinaryConfigured } from '../config/cloudinary';
 //      that signature — see frontend/src/utils/index.ts's uploadMedia().
 //   3. Cloudinary returns a permanent URL; the client sends that URL to
 //      createPost/createStory. This server only ever sees a URL string.
+//
+// Validation note: file type/size checks in the frontend composer
+// (CreatePost.tsx) are just a fast-fail UX nicety — they run in the
+// browser, so anyone could skip them and call Cloudinary directly with a
+// signature obtained from this route. ALLOWED_FORMATS and MAX_FILE_SIZE
+// below are included as *signed* parameters, which Cloudinary itself
+// enforces server-side: tampering with either value on the client
+// invalidates the signature, so this is real server-side validation, not
+// just client-side politeness duplicated in two places.
 // ─────────────────────────────────────────────────────────────────────────
+
+const ALLOWED_FORMATS = 'jpg,jpeg,png,gif,webp,mp4,mov,webm';
+const MAX_FILE_SIZE_BYTES = 25 * 1024 * 1024; // 25MB — matches the frontend's own limit
 
 export const uploadRouter = Router();
 
@@ -32,9 +44,14 @@ uploadRouter.post('/upload/signature', requireAuthHeader, (req: AuthedRequest, r
   // browsing the Cloudinary media library), not an access-control boundary.
   const folder = `pulse-connect/${req.userId}`;
 
-  // Only params actually sent to Cloudinary's upload API need to be part of
-  // the signature (excludes file, api_key, cloud_name — those aren't signed).
-  const paramsToSign = { timestamp, folder };
+  // Every param the client will actually send to Cloudinary must be part
+  // of the signature, or Cloudinary rejects the request as tampered.
+  const paramsToSign = {
+    timestamp,
+    folder,
+    allowed_formats: ALLOWED_FORMATS,
+    max_file_size: MAX_FILE_SIZE_BYTES,
+  };
   const signature = cloudinary.utils.api_sign_request(
     paramsToSign,
     process.env.CLOUDINARY_API_SECRET!
@@ -44,7 +61,10 @@ uploadRouter.post('/upload/signature', requireAuthHeader, (req: AuthedRequest, r
     signature,
     timestamp,
     folder,
+    allowedFormats: ALLOWED_FORMATS,
+    maxFileSize: MAX_FILE_SIZE_BYTES,
     apiKey: process.env.CLOUDINARY_API_KEY,
     cloudName: process.env.CLOUDINARY_CLOUD_NAME,
   });
 });
+

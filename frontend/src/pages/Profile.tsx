@@ -3,11 +3,11 @@ import { useParams } from 'react-router-dom';
 import { useQuery, useMutation } from '@apollo/client';
 import { motion } from 'framer-motion';
 import {
-  MapPin, Link2, Calendar, UserPlus, UserCheck, MessageCircle, Edit2, Play,
+  MapPin, Link2, Calendar, UserPlus, UserCheck, MessageCircle, Edit2, Play, Trash2,
 } from 'lucide-react';
 import {
   GET_USER, GET_USER_POSTS, GET_USER_PHOTOS,
-  SEND_FRIEND_REQUEST, ACCEPT_FRIEND_REQUEST,
+  SEND_FRIEND_REQUEST, ACCEPT_FRIEND_REQUEST, DELETE_POST,
 } from '@/lib/graphql';
 import { Avatar } from '@/components/UI/Avatar';
 import { PostCard } from '@/components/Post/PostCard';
@@ -39,11 +39,36 @@ export function ProfilePage() {
 
   const {
     data: photosData, loading: photosLoading,
-    fetchMore: fetchMorePhotos,
+    fetchMore: fetchMorePhotos, refetch: refetchPhotos,
   } = useQuery(GET_USER_PHOTOS, {
     variables: { userId: userData?.user?.id, limit: 30 },
     skip: !userData?.user?.id || activeTab !== 'Photos',
   });
+
+  // Deleting a photo tile deletes the whole post it belongs to (a post can
+  // have several photos — there's no "remove just this one photo, keep the
+  // post" concept, so this matches the same DELETE_POST mutation PostCard
+  // already uses, same cache-eviction pattern too). Tracks which POST is
+  // pending confirmation, not which tile, since a multi-photo post has
+  // several tiles that should all show the same confirm state together.
+  const [confirmDeletePostId, setConfirmDeletePostId] = useState<string | null>(null);
+  const [deletePost, { loading: deletingPhoto }] = useMutation(DELETE_POST, {
+    update(cache, _data, { variables }) {
+      cache.evict({ id: `Post:${variables?.id}` });
+      cache.gc();
+    },
+  });
+
+  const handleDeletePhoto = async (postId: string) => {
+    try {
+      await deletePost({ variables: { id: postId } });
+      toast.success('Post deleted');
+      refetchPhotos();
+    } catch {
+      toast.error('Failed to delete post');
+    }
+    setConfirmDeletePostId(null);
+  };
 
   const [sendRequest, { loading: sendingReq }] = useMutation(SEND_FRIEND_REQUEST, {
     refetchQueries: ['GetUser'],
@@ -53,7 +78,12 @@ export function ProfilePage() {
   });
 
   const profile = userData?.user;
-  const posts: any[] = postsData?.userPosts?.posts ?? [];
+  // Filters out any evicted-but-still-referenced cache entries — e.g. a
+  // post deleted from the Photos tab (see handleDeletePhoto below) evicts
+  // it from Apollo's normalized cache, but this separately-cached
+  // userPosts list isn't automatically re-fetched, so without this guard a
+  // stale null reference here would crash PostCard on the next render.
+  const posts: any[] = (postsData?.userPosts?.posts ?? []).filter(Boolean);
   const hasMore: boolean = postsData?.userPosts?.hasMore ?? false;
   const nextCursor: string | null = postsData?.userPosts?.nextCursor ?? null;
   const isOwner = me?.id === profile?.id;
@@ -329,12 +359,12 @@ export function ProfilePage() {
             <h2 className="font-bold text-gray-900 dark:text-white text-lg mb-4">Photos</h2>
             {(() => {
               // Flatten every post's media array into a single list of tiles.
-              // Keep postId + media index around per tile — not used for
-              // navigation yet (no single-post detail page exists), but
-              // gives each tile a stable, unique key.
+              // Keep postId around per tile — needed to delete the owning
+              // post (see handleDeletePhoto above), and gives each tile a
+              // stable, unique key alongside the media index.
               const posts = photosData?.userPhotos?.posts ?? [];
               const tiles = posts.flatMap((post: any) =>
-                (post.media ?? []).map((m: any, i: number) => ({ ...m, key: `${post.id}-${i}` }))
+                (post.media ?? []).map((m: any, i: number) => ({ ...m, postId: post.id, key: `${post.id}-${i}` }))
               );
               const hasMore = photosData?.userPhotos?.hasMore;
               const nextCursor = photosData?.userPhotos?.nextCursor;
@@ -356,31 +386,71 @@ export function ProfilePage() {
               return (
                 <>
                   <div className="grid grid-cols-3 gap-1.5">
-                    {tiles.map((tile: any) => (
-                      <a
-                        key={tile.key}
-                        href={tile.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="relative aspect-square rounded-lg overflow-hidden bg-gray-100 dark:bg-surface-dark-3 group"
-                      >
-                        {tile.type === 'VIDEO' ? (
-                          <>
-                            <video src={tile.url} className="w-full h-full object-cover" muted />
-                            <div className="absolute inset-0 bg-black/20 flex items-center justify-center group-hover:bg-black/30 transition-colors">
-                              <Play size={22} className="text-white fill-white" />
+                    {tiles.map((tile: any) => {
+                      const confirming = confirmDeletePostId === tile.postId;
+                      return (
+                        <div
+                          key={tile.key}
+                          className="relative aspect-square rounded-lg overflow-hidden bg-gray-100 dark:bg-surface-dark-3 group"
+                        >
+                          <a href={tile.url} target="_blank" rel="noopener noreferrer" className="block w-full h-full">
+                            {tile.type === 'VIDEO' ? (
+                              <>
+                                <video src={tile.url} className="w-full h-full object-cover" muted />
+                                <div className="absolute inset-0 bg-black/20 flex items-center justify-center group-hover:bg-black/30 transition-colors">
+                                  <Play size={22} className="text-white fill-white" />
+                                </div>
+                              </>
+                            ) : (
+                              <img
+                                src={tile.thumbnail || tile.url}
+                                alt=""
+                                className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                                loading="lazy"
+                              />
+                            )}
+                          </a>
+
+                          {isOwner && !confirming && (
+                            <button
+                              onClick={(e) => { e.preventDefault(); setConfirmDeletePostId(tile.postId); }}
+                              aria-label="Delete photo"
+                              title="Delete post"
+                              className="absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-black/60 hover:bg-red-600 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-all text-white"
+                            >
+                              <Trash2 size={12} />
+                            </button>
+                          )}
+
+                          {confirming && (
+                            <div className="absolute inset-0 bg-black/75 flex flex-col items-center justify-center gap-2 p-2 text-center">
+                              <p className="text-white text-xs font-medium leading-snug">
+                                Delete this post?
+                                {tile.postId && posts.find((p: any) => p.id === tile.postId)?.media?.length > 1 && (
+                                  <span className="block text-white/70 mt-0.5">All its photos will be removed too.</span>
+                                )}
+                              </p>
+                              <div className="flex items-center gap-1.5">
+                                <button
+                                  onClick={() => handleDeletePhoto(tile.postId)}
+                                  disabled={deletingPhoto}
+                                  className="px-2.5 py-1 rounded-md bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white text-xs font-semibold transition-colors"
+                                >
+                                  Delete
+                                </button>
+                                <button
+                                  onClick={() => setConfirmDeletePostId(null)}
+                                  disabled={deletingPhoto}
+                                  className="px-2.5 py-1 rounded-md bg-white/20 hover:bg-white/30 disabled:opacity-50 text-white text-xs font-semibold transition-colors"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
                             </div>
-                          </>
-                        ) : (
-                          <img
-                            src={tile.thumbnail || tile.url}
-                            alt=""
-                            className="w-full h-full object-cover group-hover:scale-105 transition-transform"
-                            loading="lazy"
-                          />
-                        )}
-                      </a>
-                    ))}
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                   {hasMore && (
                     <button
