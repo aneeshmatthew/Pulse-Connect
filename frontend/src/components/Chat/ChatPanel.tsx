@@ -1,18 +1,16 @@
-import { useState, useRef, useEffect, useCallback, memo } from 'react';
-import { useQuery, useMutation, useSubscription } from '@apollo/client';
+import { useState, useRef, useEffect, memo } from 'react';
+import { useQuery, useSubscription } from '@apollo/client';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Send, X, Phone, Video, Info, Image, Smile } from 'lucide-react';
 import {
-  GET_MESSAGES, SEND_MESSAGE, SET_TYPING,
-  NEW_MESSAGE_SUB, TYPING_STATUS_SUB,
-  MARK_CONVERSATION_READ, GET_CONVERSATIONS, CONVERSATION_WITH_USER,
+  GET_CONVERSATIONS, CONVERSATION_WITH_USER,
 } from '@/lib/graphql';
 import { subscriptionsEnabled, POLL_INTERVAL_MS } from '@/lib/apollo';
 import { Avatar } from '@/components/UI/Avatar';
 import { useAuthStore, useUIStore } from '@/store';
 import { formatMessageTime, cn } from '@/utils';
-import toast from 'react-hot-toast';
+import { useConversationChat } from '@/hooks/useConversationChat';
 
 // ─── Typing dots ──────────────────────────────────────────────────────────────
 
@@ -102,94 +100,21 @@ interface ChatWindowProps {
 const ChatWindow = memo(function ChatWindow({ conversationId, participant }: ChatWindowProps) {
   const { user } = useAuthStore();
   const { closeChat, openChat } = useUIStore();
-  const [text, setText] = useState('');
   const [minimized, setMinimized] = useState(false);
-  const [otherTyping, setOtherTyping] = useState(false);
   const parentRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  const typingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const isTypingRef = useRef(false);
 
-  const { data } = useQuery(GET_MESSAGES, {
-    variables: { conversationId, limit: 40 },
-    skip: !conversationId,
-    // Fallback for deployments without a WebSocket-capable backend (e.g.
-    // Vercel): re-poll for new messages every few seconds. Safe to merge —
-    // `messages` is cached per-conversationId and dedupes by ref.
-    pollInterval: subscriptionsEnabled ? 0 : POLL_INTERVAL_MS.chatMessages,
+  const {
+    text, setText, messages, otherTyping, sending, handleTyping, handleSend,
+  } = useConversationChat({
+    conversationId,
+    recipient: participant,
+    limit: 40,
+    // Only mark as read while the popup is actually open and not
+    // collapsed — matches the original behavior exactly.
+    markReadEnabled: !minimized,
+    onConversationCreated: (newId) => openChat(newId),
   });
-
-  const [sendMessage, { loading: sending }] = useMutation(SEND_MESSAGE, {
-    update(cache, { data }) {
-      const newMsg = data?.sendMessage;
-      // Nothing to merge into GET_MESSAGES yet if this was the very first
-      // message of a brand-new conversation — there's no cached query for
-      // a conversationId that didn't exist when this component mounted.
-      // handleSend() below promotes to the real conversationId afterward,
-      // which remounts this component and fetches fresh from the server.
-      if (!newMsg || !conversationId) return;
-      cache.updateQuery(
-        { query: GET_MESSAGES, variables: { conversationId, limit: 40 } },
-        (existing) => {
-          if (!existing) return { messages: [newMsg] };
-          const exists = existing.messages.some((m: any) => m.id === newMsg.id);
-          return exists ? existing : { messages: [...existing.messages, newMsg] };
-        }
-      );
-    },
-    refetchQueries: [GET_CONVERSATIONS],
-  });
-
-  const [setTypingMutation] = useMutation(SET_TYPING);
-  const [markRead] = useMutation(MARK_CONVERSATION_READ);
-
-  useSubscription(NEW_MESSAGE_SUB, {
-    variables: { conversationId },
-    skip: !subscriptionsEnabled || !conversationId,
-    onData: ({ client, data }) => {
-      const newMsg = data.data?.newMessage;
-      if (!newMsg) return;
-      client.cache.updateQuery(
-        { query: GET_MESSAGES, variables: { conversationId, limit: 40 } },
-        (existing) => {
-          if (!existing) return { messages: [newMsg] };
-          const exists = existing.messages.some((m: any) => m.id === newMsg.id);
-          return exists ? existing : { messages: [...existing.messages, newMsg] };
-        }
-      );
-      // Auto-mark read when chat is open and not minimized
-      if (!minimized) {
-        markRead({ variables: { conversationId } });
-      }
-    },
-  });
-
-  // Typing indicator has no polling equivalent (polling for it would mean
-  // a request every second or two just to catch a ~1s-long event) — it's
-  // simply unavailable without a WebSocket-capable backend.
-  useSubscription(TYPING_STATUS_SUB, {
-    variables: { conversationId },
-    skip: !subscriptionsEnabled || !conversationId,
-    onData: ({ data }) => {
-      const s = data.data?.typingStatus;
-      if (s && s.userId !== user?.id) {
-        setOtherTyping(s.isTyping);
-        if (s.isTyping) {
-          // Auto-clear after 3s in case the stop event is lost
-          setTimeout(() => setOtherTyping(false), 3000);
-        }
-      }
-    },
-  });
-
-  const messages: any[] = data?.messages ?? [];
-
-  // Mark as read on open / un-minimize
-  useEffect(() => {
-    if (!minimized && conversationId) {
-      markRead({ variables: { conversationId } });
-    }
-  }, [minimized, conversationId]);
 
   // Virtualizer
   const rowVirtualizer = useVirtualizer({
@@ -208,61 +133,6 @@ const ChatWindow = memo(function ChatWindow({ conversationId, participant }: Cha
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages.length]);
 
-  const stopTyping = useCallback(() => {
-    if (!conversationId) return; // no conversation yet — nothing to signal
-    if (isTypingRef.current) {
-      isTypingRef.current = false;
-      setTypingMutation({ variables: { conversationId, isTyping: false } });
-    }
-  }, [conversationId, setTypingMutation]);
-
-  const handleTyping = useCallback(() => {
-    if (!conversationId) return; // no conversation yet — nothing to signal
-    if (!isTypingRef.current) {
-      isTypingRef.current = true;
-      setTypingMutation({ variables: { conversationId, isTyping: true } });
-    }
-    if (typingTimer.current) clearTimeout(typingTimer.current);
-    typingTimer.current = setTimeout(stopTyping, 2000);
-  }, [conversationId, setTypingMutation, stopTyping]);
-
-  // Stop typing on unmount
-  useEffect(() => {
-    return () => {
-      if (typingTimer.current) clearTimeout(typingTimer.current);
-      stopTyping();
-    };
-  }, [stopTyping]);
-
-  const handleSend = useCallback(async () => {
-    const content = text.trim();
-    if (!content || sending) return;
-    setText('');
-    stopTyping();
-    try {
-      const { data } = await sendMessage({
-        variables: {
-          input: conversationId
-            ? { conversationId, content }
-            : { recipientId: participant.id, content }, // first message — server creates the conversation
-        },
-      });
-      if (!conversationId) {
-        // Promote from "pending" to a real conversation now that one
-        // exists, so subsequent renders use the normal conversationId flow
-        // (message history, subscriptions, read receipts, etc.).
-        const newConversationId = data?.sendMessage?.conversation?.id;
-        if (newConversationId) openChat(newConversationId);
-      }
-    } catch (err: any) {
-      // Restoring the typed text on failure is correct, but doing it
-      // silently looks exactly like "the input didn't clear" — the text
-      // reappears with no explanation. Surface the real error so a failed
-      // send is obviously a failed send, not a mystery UI glitch.
-      setText(content);
-      toast.error(err?.graphQLErrors?.[0]?.message ?? 'Message failed to send — check your connection');
-    }
-  }, [text, sending, conversationId, sendMessage, stopTyping, participant.id, openChat]);
 
   return (
     <motion.div

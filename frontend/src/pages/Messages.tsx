@@ -1,19 +1,16 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { useQuery, useLazyQuery, useMutation, useSubscription } from '@apollo/client';
+import { useQuery, useLazyQuery } from '@apollo/client';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Search, Send, Phone, Video, Info, Edit, ArrowLeft, MessageCircle, X } from 'lucide-react';
-import {
-  GET_CONVERSATIONS, GET_MESSAGES, SEND_MESSAGE, SEARCH_USERS,
-  NEW_MESSAGE_SUB, TYPING_STATUS_SUB, SET_TYPING, MARK_CONVERSATION_READ,
-} from '@/lib/graphql';
+import { GET_CONVERSATIONS, SEARCH_USERS } from '@/lib/graphql';
 import { subscriptionsEnabled, POLL_INTERVAL_MS } from '@/lib/apollo';
 import { Avatar } from '@/components/UI/Avatar';
 import { AppLayout } from './Home';
 import { useAuthStore } from '@/store';
 import { formatMessageTime, timeAgo, cn } from '@/utils';
-import toast from 'react-hot-toast';
+import { useConversationChat } from '@/hooks/useConversationChat';
 
 export function MessagesPage() {
   const { user } = useAuthStore();
@@ -26,79 +23,38 @@ export function MessagesPage() {
   // (components/Chat/ChatPanel.tsx). No conversationId exists until the
   // first message is actually sent.
   const [pendingRecipient, setPendingRecipient] = useState<any | null>(null);
-  const [text, setText] = useState('');
-  const [otherTyping, setOtherTyping] = useState(false);
   const [searchText, setSearchText] = useState('');
   const [showNewMessage, setShowNewMessage] = useState(false);
   const [newMsgSearch, setNewMsgSearch] = useState('');
 
   const parentRef = useRef<HTMLDivElement>(null);
-  const typingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const isTypingRef = useRef(false);
   const newMessagePopoverRef = useRef<HTMLDivElement>(null);
 
   const { data: convsData } = useQuery(GET_CONVERSATIONS, {
     skip: !user,
     pollInterval: subscriptionsEnabled ? 0 : POLL_INTERVAL_MS.conversationsList,
   });
-  const { data: msgsData } = useQuery(GET_MESSAGES, {
-    variables: { conversationId: activeConvId, limit: 50 },
-    skip: !activeConvId,
-    // Fallback for deployments without a WebSocket-capable backend (e.g.
-    // Vercel): re-poll for new messages every few seconds. Safe to merge —
-    // `messages` is cached per-conversationId and dedupes by ref.
-    pollInterval: subscriptionsEnabled ? 0 : POLL_INTERVAL_MS.chatMessages,
-  });
 
-  const [sendMessage, { loading: sending }] = useMutation(SEND_MESSAGE, {
-    update(cache, { data }) {
-      const newMsg = data?.sendMessage;
-      if (!newMsg || !activeConvId) return;
-      cache.updateQuery(
-        { query: GET_MESSAGES, variables: { conversationId: activeConvId, limit: 50 } },
-        (existing) => {
-          if (!existing) return { messages: [newMsg] };
-          const exists = existing.messages.some((m: any) => m.id === newMsg.id);
-          return exists ? existing : { messages: [...existing.messages, newMsg] };
-        }
-      );
-    },
-    refetchQueries: [GET_CONVERSATIONS],
-  });
+  const conversations = convsData?.conversations ?? [];
+  const activeConv = conversations.find((c: any) => c.id === activeConvId);
+  const otherParticipant = activeConv?.participants?.find((p: any) => p.id !== user?.id)
+    ?? activeConv?.participants?.[0]
+    ?? pendingRecipient; // starting a new conversation — no activeConv exists yet
 
-  const [setTypingMutation] = useMutation(SET_TYPING);
-  const [markRead] = useMutation(MARK_CONVERSATION_READ);
-
-  useSubscription(NEW_MESSAGE_SUB, {
-    variables: { conversationId: activeConvId! },
-    skip: !activeConvId || !subscriptionsEnabled,
-    onData: ({ client, data }) => {
-      const newMsg = data.data?.newMessage;
-      if (!newMsg || !activeConvId) return;
-      client.cache.updateQuery(
-        { query: GET_MESSAGES, variables: { conversationId: activeConvId, limit: 50 } },
-        (existing) => {
-          if (!existing) return { messages: [newMsg] };
-          const exists = existing.messages.some((m: any) => m.id === newMsg.id);
-          return exists ? existing : { messages: [...existing.messages, newMsg] };
-        }
-      );
-      markRead({ variables: { conversationId: activeConvId } });
+  const {
+    text, setText, messages, otherTyping, sending, handleTyping, handleSend,
+  } = useConversationChat({
+    conversationId: activeConvId,
+    recipient: pendingRecipient,
+    limit: 50,
+    // No "minimized" concept on the full page — always mark read while a
+    // conversation is selected, matching the original behavior exactly.
+    markReadEnabled: true,
+    onConversationCreated: (newId) => {
+      setActiveConvId(newId);
+      setPendingRecipient(null);
     },
   });
-
-  useSubscription(TYPING_STATUS_SUB, {
-    variables: { conversationId: activeConvId! },
-    skip: !activeConvId || !subscriptionsEnabled,
-    onData: ({ data }) => {
-      const s = data.data?.typingStatus;
-      if (s && s.userId !== user?.id) {
-        setOtherTyping(s.isTyping);
-        if (s.isTyping) setTimeout(() => setOtherTyping(false), 3000);
-      }
-    },
-  });
-
   const [searchUsers, { data: userSearchData, loading: userSearchLoading }] = useLazyQuery(SEARCH_USERS);
 
   // Debounced user search for the "New message" popover
@@ -126,20 +82,6 @@ export function MessagesPage() {
     };
   }, [showNewMessage]);
 
-  // Mark as read when entering conversation
-  useEffect(() => {
-    if (activeConvId) markRead({ variables: { conversationId: activeConvId } });
-  }, [activeConvId]);
-
-  const conversations = convsData?.conversations ?? [];
-  const messages: any[] = msgsData?.messages ?? [];
-
-  // ✅ Fix: find OTHER participant using user.id
-  const activeConv = conversations.find((c: any) => c.id === activeConvId);
-  const otherParticipant = activeConv?.participants?.find((p: any) => p.id !== user?.id)
-    ?? activeConv?.participants?.[0]
-    ?? pendingRecipient; // starting a new conversation — no activeConv exists yet
-
   const rowVirtualizer = useVirtualizer({
     count: messages.length + (otherTyping ? 1 : 0),
     getScrollElement: () => parentRef.current,
@@ -156,64 +98,9 @@ export function MessagesPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages.length, activeConvId]);
 
-  const stopTyping = useCallback(() => {
-    if (isTypingRef.current && activeConvId) {
-      isTypingRef.current = false;
-      setTypingMutation({ variables: { conversationId: activeConvId, isTyping: false } });
-    }
-  }, [activeConvId, setTypingMutation]);
-
-  const handleTyping = useCallback(() => {
-    if (!activeConvId) return;
-    if (!isTypingRef.current) {
-      isTypingRef.current = true;
-      setTypingMutation({ variables: { conversationId: activeConvId, isTyping: true } });
-    }
-    if (typingTimer.current) clearTimeout(typingTimer.current);
-    typingTimer.current = setTimeout(stopTyping, 2000);
-  }, [activeConvId, setTypingMutation, stopTyping]);
-
-  useEffect(() => () => {
-    if (typingTimer.current) clearTimeout(typingTimer.current);
-    stopTyping();
-  }, [stopTyping]);
-
-  const handleSend = useCallback(async () => {
-    const content = text.trim();
-    if (!content || (!activeConvId && !pendingRecipient) || sending) return;
-    setText('');
-    stopTyping();
-    try {
-      const { data } = await sendMessage({
-        variables: {
-          input: activeConvId
-            ? { conversationId: activeConvId, content }
-            : { recipientId: pendingRecipient.id, content }, // first message — server creates the conversation
-        },
-      });
-      if (!activeConvId) {
-        // Promote from "pending" to a real conversation now that one exists.
-        const newConversationId = data?.sendMessage?.conversation?.id;
-        if (newConversationId) {
-          setActiveConvId(newConversationId);
-          setPendingRecipient(null);
-        }
-      }
-    } catch (err: any) {
-      // Restoring the typed text on failure is correct, but doing it
-      // silently looks exactly like "the input didn't clear" — the text
-      // reappears with no explanation. Surface the real error so a failed
-      // send is obviously a failed send, not a mystery UI glitch.
-      setText(content);
-      toast.error(err?.graphQLErrors?.[0]?.message ?? 'Message failed to send — check your connection');
-    }
-  }, [text, activeConvId, pendingRecipient, sending, sendMessage, stopTyping]);
-
   const handleSelectConv = useCallback((id: string) => {
     setActiveConvId(id);
     setPendingRecipient(null);
-    setOtherTyping(false);
-    setText('');
   }, []);
 
   const handleStartNewMessage = useCallback((recipient: any) => {
@@ -228,8 +115,6 @@ export function MessagesPage() {
     } else {
       setActiveConvId(null);
       setPendingRecipient(recipient);
-      setOtherTyping(false);
-      setText('');
     }
     setShowNewMessage(false);
     setNewMsgSearch('');

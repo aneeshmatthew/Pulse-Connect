@@ -254,14 +254,305 @@ subscription { newNotification { type message sender { fullName } } }
 
 ## 🐛 Known Gaps / Bug Log
 
-Running log of gaps found during review, kept up to date as issues are found and fixed. Newest entries at the top.
+Running log of gaps found during review, kept up to date as issues are found and fixed. Newest entries at the top. Full details for each fix are below this summary — the table is just for quickly finding one.
 
-### 2026-08-22 — Todo list (working through one at a time)
+### Todo list (current)
 
-- [x] `Post.tags` had no field resolver and was silently returned as `null` outside the single-post query — same class of bug as the `User.friends` fix. Fixed.
-- [x] Six nav destinations (Friends, Watch, Marketplace, Saved, Events, Settings) had no matching routes — clicking silently bounced back to Home. Added placeholder pages so navigation no longer fails silently.
-- [ ] Floating chat popup (`ChatPanel`/`ChatWindow`) reported as having no way to close it. **Deferred at the user's request** — see notes below; needs a repro before diagnosing further, since the code as written does have a close button wired to `closeChat()`.
-- [ ] Build real Friends / Watch / Marketplace / Saved / Events / Settings pages to replace the "Coming Soon" placeholders (no backend schema exists yet for any of these either — this is new feature work, not a bug fix).
+- [x] Messages page's "New message" pencil icon had no `onClick` handler — fixed (2026-08-23 (1))
+- [x] Friends page — replaced the "Coming Soon" placeholder with a real page (2026-08-23 (2))
+- [x] Notification click-through — fixed (2026-08-23 (3))
+- [x] Photos tab had no way to delete a post; upload had no real server-side validation — both fixed (2026-08-23 (4))
+- [x] Reaction picker popup closed before you could click it — fixed (2026-08-23 (5))
+- [x] Duplicated chat logic extracted into a shared hook — fixed (2026-08-23 (6))
+- [x] Apollo Server v4 EOL upgraded to v5 — fixed (2026-08-23 (6))
+- [ ] Five nav destinations remain (Watch, Marketplace, Saved, Events, Settings) — still "Coming Soon" placeholders.
+
+### Open items
+
+- [ ] Build real Watch / Marketplace / Saved / Events / Settings pages — currently "Coming Soon" placeholders (see 2026-08-22 (1)). No backend schema exists yet for any of these, so each is new feature work, not a quick fix.
+- [ ] No automated test currently guards against a populated-list/ref field silently returning `null`, or against the Mongoose single-nested-subdocument default-object gotcha that caused entry 2026-08-22 (10). Worth a resolver-level integration test suite at some point — `GET_USER` with a seeded user that has friends, `feed`/`post` with a seeded post that has tags, `sendMessage` with a `recipientId` (no prior conversation), and a message with no `media` attached.
+- [ ] **Verify your Vercel project's Node.js runtime is set to 20.x or later.** Apollo Server 5 requires Node ≥20 — this is a project-level dashboard setting Claude cannot see or change remotely. If it's currently pinned to 18.x, the backend will fail to boot after this deploy. Check: Vercel dashboard → backend project → Settings → General → Node.js Version.
+
+### At a glance
+
+| # | Date | Issue | Status |
+|---|------|-------|--------|
+| 2026-08-23 (6) | Aug 23 | Chat logic duplication extracted into a shared hook; Apollo Server 4 (EOL) upgraded to 5 | ✅ Fixed |
+| 2026-08-23 (5) | Aug 23 | Reaction picker popup on Like closed before you could click an emoji | ✅ Fixed |
+| 2026-08-23 (4) | Aug 23 | Photos tab had no delete option; upload had no real server-side validation | ✅ Fixed |
+| 2026-08-23 (3) | Aug 23 | Notification click-through — likes/comments went nowhere; no post detail page existed at all | ✅ Fixed |
+| 2026-08-23 (2) | Aug 23 | Friends page built out for real (was a "Coming Soon" placeholder) | ✅ Fixed |
+| 2026-08-23 (1) | Aug 23 | Messages page "New message" pencil icon had no handler | ✅ Fixed |
+| 2026-08-22 (10) | Aug 22 | `Message.media` Mongoose subdocument defaulted to `{}`, causing "Internal server error" on every text-only chat message | ✅ Fixed |
+| 2026-08-22 (9) | Aug 22 | GraphQL errors were never logged server-side in production | ✅ Fixed |
+| 2026-08-22 (8) | Aug 22 | Regression: entry (7)'s routing fix broke `/graphql` and `/health` | ✅ Fixed |
+| 2026-08-22 (7) | Aug 22 | Root cause of the CORS saga: Vercel's bracket catch-all only matches single-segment paths | ✅ Fixed |
+| 2026-08-22 (6) | Aug 22 | Chat close-button investigation, notification not removed after accept/decline, chat input not clearing | ✅ Fixed |
+| 2026-08-22 (5) | Aug 22 | Profile "Photos" tab was a hardcoded placeholder | ✅ Fixed |
+| 2026-08-22 (4) | Aug 22 | Photo upload CORS error masked a server crash | ✅ Fixed |
+| 2026-08-22 (3) | Aug 22 | Profile "Message" button passed a user id instead of a conversation id | ✅ Fixed |
+| 2026-08-22 (2) | Aug 22 | `Post.tags` had no field resolver (same bug class as `User.friends`) | ✅ Fixed |
+| 2026-08-22 (1) | Aug 22 | 6 nav links had no matching routes, silently bounced to Home | ✅ Interim fix (placeholders) |
+| 2026-08-21 (4) | Aug 21 | Media upload moved off local disk to Cloudinary | ✅ Fixed |
+| 2026-08-21 (3) | Aug 21 | Check-in used the native `window.prompt()` | ✅ Fixed |
+| 2026-08-21 (2) | Aug 21 | Friend request notifications had no Accept/Decline; Photo/Video composer was decorative | ✅ Fixed |
+| 2026-08-21 (1) | Aug 21 | Profile avatar off-center; Friends tab empty despite correct count | ✅ Fixed |
+
+<details>
+<summary><strong>Full entry details</strong> (click to expand)</summary>
+
+### 2026-08-23 (6) — Chat logic deduplicated into a shared hook; Apollo Server upgraded to v5
+
+Two unrelated cleanup items tackled together at the user's request, both from the "smaller, deferred items" list.
+
+**1. Chat logic duplication.** `ChatPanel.tsx` (floating popup) and `Messages.tsx` (full page) each independently implemented message fetching, sending (including the pending-conversation flow from 2026-08-22 (3)), typing indicators, and subscriptions — nearly 1,000 combined lines with heavy overlap, flagged as a risk during the 2026-08-23 cleanup pass but deliberately left alone at the time since both implementations had just been stabilized through a long debugging session.
+
+Extracted into `frontend/src/hooks/useConversationChat.ts`, used by both call sites. Rendering (very different between a compact popup and a full virtualized page) stayed in each component — only the actual chat *logic* moved. A few behavioral differences between the two original implementations were deliberately preserved rather than silently merged away: the popup uses a 40-message page size, the full page uses 50; the popup only marks messages read while open and not minimized, the full page always does. Both are now explicit hook parameters instead of hard-coded per file.
+
+One real bug surfaced *while* extracting this, not before: the full Messages page relied on switching conversations via `handleSelectConv` explicitly resetting typing/draft state, while the popup got the same effect for free by fully remounting (via a changing `key` prop) every time the conversation changed. Once both shared one hook instance, that reset needed to be explicit and correct for *both* callers — including the edge case of switching from one not-yet-created "pending" conversation straight to a different pending recipient, where the conversation id never changes (both are `null`) so a naive reset keyed only on conversation id would miss it. Fixed by keying the reset on both conversation id and recipient id.
+
+Verified with `tsc` + a real `vite build`, not just typechecking.
+
+**2. Apollo Server 4 → 5.** Flagged as EOL (since January 26, 2026) back during the dependency cleanup pass. Confirmed via Apollo's own migration docs and package registry:
+- `@apollo/server` bumped `^4.10.0` → `^5.5.1`; its `graphql` peer dependency requirement bumped `^16.8.1` → `^16.11.0` to match.
+- The Express integration moved out of the core package in v5 — `@apollo/server/express4` no longer exists. Installed the new standalone `@as-integrations/express4` package (same `expressMiddleware` export, same API, just relocated) and updated both entrypoints (`backend/api/_app.ts`, `backend/src/index.ts`) to import from it.
+- `engines.node` in `backend/package.json` bumped `>=18.x` → `>=20.x`, matching Apollo Server 5's actual runtime requirement.
+
+Verified beyond just `tsc`: compiled the backend to real JS and, since a live MongoDB connection isn't available in this environment, ran a standalone smoke test that builds the actual production schema and resolvers, constructs a real `ApolloServer` instance, and calls `.start()` — all of which succeeded without a database, confirming the Apollo-specific parts of the upgrade work end-to-end against this project's real schema, not just a toy example.
+
+**Requires action on your end:** Apollo Server 5 needs Node.js ≥20 *at runtime*, not just to build. This is a Vercel project dashboard setting (Settings → General → Node.js Version) that isn't visible or changeable from here — if your backend project is currently pinned to Node 18.x, it will fail to boot after this deploys until that setting is updated.
+
+**Files touched:** `frontend/src/hooks/useConversationChat.ts` (new), `frontend/src/components/Chat/ChatPanel.tsx`, `frontend/src/pages/Messages.tsx`, `backend/package.json`, `backend/api/_app.ts`, `backend/src/index.ts`
+
+**Status:** ✅ Both fixed and typechecked clean, verified with real builds (frontend `vite build`, backend compiled + smoke-tested against the real schema). ⚠️ Needs the Vercel Node.js version check above before redeploying.
+
+### 2026-08-23 (5) — Reaction picker closed before you could click it
+
+**Symptom (reported by user):** hovering the Like button on a post shows the emoji reaction picker, but it disappears too fast to actually click an emoji — needed more time once hovering over the popup itself.
+
+**Root cause:** `frontend/src/components/Post/PostCard.tsx`'s hover-intent logic used one `ref` (`reactionTimer`) to track a pending "show" timeout, but the "hide" timeout — started when the mouse left the Like button — was a bare `setTimeout(...)` whose return value was never stored anywhere. That makes it **uncancelable**: moving the mouse from the button toward the picker (crossing the small gap between them) started a countdown to close that nothing could stop, not even the picker's own `onMouseEnter` handler, since that handler was clearing a *different*, already-irrelevant timer reference. The picker could vanish before the pointer ever reached it, or close the instant you tried to move toward an emoji.
+
+**Fix:** both the show and hide timeouts now share the same ref consistently, with each one clearing whatever's currently pending before scheduling itself. Concretely:
+- Entering the Like button clears any pending timer, then schedules **show** after 500ms.
+- Leaving the Like button clears any pending timer, then schedules **hide** after 400ms (up from 300ms).
+- Entering the picker itself now correctly cancels that pending hide — it stays open indefinitely while the pointer is over it.
+- Leaving the picker re-arms the same reliable hide-after-400ms behavior.
+
+Also added a cleanup on unmount so a pending hide timer can't fire `setState` after the component's gone (e.g. navigating away mid-hover).
+
+**Files touched:** `frontend/src/components/Post/PostCard.tsx`
+
+**Status:** ✅ Fixed, typechecked clean, and verified with a real production build.
+
+### 2026-08-23 (4) — Photos tab: delete a photo, deletes the post; real server-side upload validation
+
+**Two separate things reported together, both fixed:**
+
+**1. No way to delete a post from the Photos tab.** You could delete a post from the feed/Posts tab (`PostCard`'s own menu), but the Photos tab (built in 2026-08-22 (5)) only ever let you view/open tiles — no delete option existed there at all, even though a photo tile *is* a post under the hood. Since a post can have several photos (`Post.media` is an array), "delete this photo" doesn't map to "remove one image, keep the rest" — there's no partial-edit concept here — so this matches what was asked: deleting a photo tile deletes the *entire post* it belongs to, exactly like deleting it from the feed would. Reuses the same `DELETE_POST` mutation and cache-eviction pattern `PostCard.tsx` already uses, with an inline confirm-on-the-tile step (consistent with the rest of the app avoiding native `window.confirm`-style dialogs) that also warns you when a post has multiple photos, since deleting removes all of them together.
+
+**Found and fixed a related edge case while implementing this:** deleting a post evicts it from Apollo's normalized cache, but two *other* already-cached lists that could also reference the same post — the Profile page's own Posts tab, and the main Home feed — weren't being re-fetched, so switching to either after a delete could leave a dangling `null` reference in the list and crash `PostCard` trying to render it. Added a defensive `.filter(Boolean)` in both places.
+
+**2. No real server-side upload validation.** Flagged as an open item back in 2026-08-22's Cloudinary migration — file type/size checks in `CreatePost.tsx` only ever ran in the browser, so anyone could skip the UI entirely and call Cloudinary directly with a signature obtained from our `/api/upload/signature` route, uploading any file type or size. Fixed by adding `allowed_formats` and `max_file_size` as **signed parameters** in that route — Cloudinary itself enforces them server-side once they're part of the signature, so tampering with either value client-side just invalidates the signature rather than bypassing the check. The existing client-side checks stay as-is; they're now a fast-fail UX nicety layered on top of enforcement that can't be skipped, rather than the only enforcement that existed.
+
+**Files touched:** `backend/src/routes/upload.ts`, `frontend/src/utils/index.ts`, `frontend/src/pages/Profile.tsx`, `frontend/src/components/Feed/Feed.tsx`
+
+**Status:** ✅ Both fixed, typechecked clean, and verified with a real production build on both projects.
+
+### 2026-08-23 (3) — Notification click-through: likes/comments now navigate somewhere
+
+**What was there before:** clicking a friend-request notification worked (Confirm/Delete buttons, added back in 2026-08-22 (6)), but clicking anything else — a "X liked your post" or "X commented on your post" notification — did nothing. The backend already stored the right data for this (`Notification.entityId` / `entityType`, correctly set to the post's id on both `POST_LIKE` and `POST_COMMENT`/`COMMENT_REPLY` creation), it just had nowhere to send you: **there was no single-post detail page anywhere in the app.** `GET_POST` existed in the schema and was even already defined as a frontend query constant, but nothing had ever called it — flagged as a loose end all the way back in entry 2026-08-22 (2).
+
+**Fix:**
+1. `frontend/src/pages/PostDetail.tsx` (new) — a real `/post/:id` page, reusing the existing `GET_POST` query and the existing `PostCard`/`CommentSection` components rather than building new rendering logic. Handles loading and not-found states.
+2. `PostCard` got one small addition: an `initiallyExpanded` prop so the comment thread is open by default when you arrive here — someone clicking "commented on your post" wants to see the comment immediately, not click "Comment" again to reveal what they came for. Feed usage is unaffected (defaults to `false`, same as before).
+3. `frontend/src/components/Sidebar/Navbar.tsx` — notification rows are now clickable (previously only the Accept/Decline buttons inside a `FRIEND_REQUEST` notification had a click handler; the row itself did nothing). Routes by type: `FRIEND_REQUEST`/`FRIEND_ACCEPT` → the sender's profile, anything with `entityType: 'post'` → the new post detail page, anything else (e.g. `STORY_VIEW`, `MESSAGE` — types that don't have a destination page yet) → falls back to the sender's profile rather than doing nothing. Also marks the notification read on click, via the `markNotificationRead` mutation that already existed in the schema but had never been called from the frontend.
+
+**Files touched:** `frontend/src/lib/graphql.ts`, `frontend/src/pages/PostDetail.tsx` (new), `frontend/src/components/Post/PostCard.tsx`, `frontend/src/components/Sidebar/Navbar.tsx`, `frontend/src/App.tsx`
+
+**Status:** ✅ Fixed, typechecked clean, and verified with a real production build on both projects.
+
+### 2026-08-23 (2) — Friends page: first of the six nav placeholders built out for real
+
+**What was there before:** a "Coming Soon" placeholder (from 2026-08-22 (1)) — no real page, and no backend query/mutation support for a friends-management UI beyond what already existed for the notification dropdown's accept/decline buttons.
+
+**What this adds:**
+
+*Backend:*
+1. `Query.friendRequests: [FriendRequest!]!` (new `FriendRequest { from: User!, sentAt: DateTime! }` type) — the current user's incoming pending requests with sender details. Previously the only way to see a friend request at all was the notification dropdown; the underlying data (`User.friendRequests`) was already stored, just never exposed as its own query.
+2. `Query.sentFriendRequests: [User!]!` — the other side of the same feature: people the current user has sent a still-pending request to. Needed for a "Sent" view with a cancel option, which didn't exist anywhere before.
+3. `Mutation.cancelFriendRequest(userId: ID!): Boolean!` — lets the *sender* withdraw a request. This is genuinely new capability, not just a new query: the existing `declineFriendRequest` only ever removes a request from the *caller's own* incoming list, so it only works for the recipient — there was no way for the sender to cancel a request they'd sent.
+
+*Frontend:* `frontend/src/pages/Friends.tsx` (new), three tabs:
+- **All Friends** — searchable list (reuses the existing `GET_USER(id)` query's `friends` field, same one the Profile page already uses), Message and Remove actions per person.
+- **Requests** — incoming requests with Confirm/Delete (reuses the same `acceptFriendRequest`/`declineFriendRequest` mutations already wired up in the notification dropdown), plus a Sent Requests section with Cancel.
+- **Suggestions** — reuses the existing `suggestedFriends` query (was already built, just never had a dedicated browsing page) with an Add Friend action.
+
+The "Message" button reuses the same `openChatWithUser` pending-conversation flow already shipped for the Profile page and the Messages page's "New message" popover, so starting a chat from a friend's card behaves identically to those two entry points.
+
+**Files touched:** `backend/src/graphql/typedefs/index.ts`, `backend/src/graphql/resolvers/user.resolvers.ts`, `frontend/src/lib/graphql.ts`, `frontend/src/pages/Friends.tsx` (new), `frontend/src/App.tsx`
+
+**Status:** ✅ Fixed, typechecked clean, and verified with a real production build (`vite build` / `tsc`) on both projects — not just type-level checking.
+
+### 2026-08-23 (1) — Messages page "New message" pencil icon now works
+
+**Symptom:** the pencil icon in the Chats panel header (top of `/messages`) had no `onClick` handler at all — clicking it did nothing. Flagged as an open item back in entry 2026-08-22 (3), which fixed the equivalent bug on the Profile page's "Message" button but explicitly scoped this second entry point out as its own follow-up.
+
+**Fix:** brought `frontend/src/pages/Messages.tsx` up to the same capability as the floating chat popup (`ChatPanel.tsx`):
+1. Clicking the pencil opens a popover with a debounced people-search (reusing the existing `SEARCH_USERS` query, same pattern as the navbar's search).
+2. Picking someone who already has a conversation with you just opens it (a plain client-side lookup against the already-loaded `GET_CONVERSATIONS` list — no duplicate conversations).
+3. Picking someone new opens the chat pane in the same "pending" state used elsewhere in the app: no `conversationId` yet, message history/typing/read-receipts are skipped, and the first message sent uses `sendMessage({ recipientId })` to lazily create the conversation server-side (this backend capability already existed from a previous fix — it just had no second way to trigger it from this page). Once that first send succeeds, the view promotes to the real conversation the normal way.
+
+This is the same pending-conversation pattern already shipped for the Profile page's "Message" button, just extended to this page's own local state rather than the global chat-popup store, since `Messages.tsx` manages its own conversation state independently of `ChatPanel.tsx`.
+
+**Files touched:** `frontend/src/pages/Messages.tsx`
+
+**Status:** ✅ Fixed and typechecked clean.
+
+### 2026-08-22 (10) — Found it: `Message.media` Mongoose subdocument defaulted to `{}` instead of staying absent
+
+**Symptom:** The "Internal server error" toast that had been hunted across several previous entries. Thanks to entry (9)'s logging fix finally being live, the real error surfaced: `Cannot return null for non-nullable field MessageMedia.url.` at path `sendMessage.media.url`.
+
+**Root cause — a genuine pre-existing bug, unrelated to any of the routing/CORS work from entries (7)/(8)/(9).** `backend/src/models/Message.ts` defined `media` using Mongoose's shorthand nested-object syntax: `media: { url: String, type: String, name: String, size: Number }`. Mongoose treats this as a **single nested subdocument** and — this is a well-known Mongoose gotcha — automatically defaults it to an empty object `{}` on every document, even when `media` is never explicitly set. So every plain text message (no attachment at all — which is most messages) was actually being saved with `media: { url: undefined, type: undefined, ... }`, a real non-null object with empty fields inside, instead of `media` being genuinely absent.
+
+When GraphQL resolved that field, it saw a non-null `media` object and tried to complete `MessageMedia.url: String!` (non-nullable in the schema) against `undefined` — which GraphQL treats as a hard error, not a soft null. Because `Message.media` itself is nullable, the null only propagated up to that one field rather than killing the whole response, which is exactly why some messages still appeared to "work" (the mutation's `errors` array killed the client-side promise, triggering the fallback/retry UI, while the message had genuinely already been saved to the database — a partial-failure state that looked like inconsistent behavior from the outside).
+
+**Why this took so long to find:** the error was masked to a generic message for the client (correct, for security) and — until entry (9)'s fix — silently dropped everywhere else too, so there was no error to search logs for at all. It also wasn't something code review alone could catch, since the bug lives in Mongoose's *default value behavior* for a schema shape that looks completely reasonable on its face.
+
+**Fix:**
+1. `backend/src/models/Message.ts` — wrapped `media` as an explicit sub-schema (`new Schema({...}, { _id: false })`) with `default: undefined`, which stops Mongoose from auto-instantiating the empty object at all. New messages now correctly store `media` as genuinely absent when none is attached.
+2. `backend/src/graphql/resolvers/message.resolvers.ts` — added a defensive `Message.media` resolver (`parent.media?.url ? parent.media : null`) so any message **already** sitting in the database with the broken empty-object shape (every "hello"/"test" message sent during this whole debugging saga) stops erroring too, without needing a database migration.
+
+**Bonus finding while auditing for the same bug elsewhere:** `backend/src/models/Comment.ts`'s `media` field already uses this exact correct pattern (`type: new Schema(...), default: null`) — so this fix had already been applied once in the codebase, just inconsistently, and got missed for `Message`. Checked `Post.media` (an array, defaults safely to `[]`, not affected) and `Story.media` (fields are marked Mongoose `required: true`, so a Story literally can't be saved without real media values, sidestepping the issue by construction) — neither needed a change.
+
+**Files touched:** `backend/src/models/Message.ts`, `backend/src/graphql/resolvers/message.resolvers.ts`
+
+**Status:** ✅ Fixed and typechecked clean. This should resolve the "Internal server error" toast and the associated "input doesn't clear" symptom from entry (6) — that was never actually a text-clearing bug, it was `sendMessage` failing and the UI correctly (if silently) restoring the typed text on failure.
+
+### 2026-08-22 (9) — GraphQL errors were completely invisible in production logs
+
+**Symptom:** An "Internal server error" toast kept appearing, but there was nothing to debug it with: the Network tab showed the `/graphql` request as a normal `200 OK` (expected — GraphQL returns errors inside the response body with a 200 status, not as an HTTP error code), and Vercel's function logs showed nothing related when searching for "error" (only an unrelated Node.js deprecation warning that happened to contain that word in its own text).
+
+**Root cause — a pre-existing gap, not something introduced this session.** Both `backend/api/_app.ts` and `backend/src/index.ts` already had a `formatError` handler that correctly masks unexpected errors to a generic "Internal server error" message for the client in production (good — you don't want to leak internal details to the browser). But the `console.error(...)` call logging the *real* error was wrapped in `if (isDev) ...` — meaning in production, the real error was masked for the client **and never logged anywhere at all**. There was no way to see what actually went wrong, from either side.
+
+This is why extensive code review couldn't pin down the actual bug — there wasn't a way to *see* it yet, only to guess at it.
+
+**Fix:** the real error (message, GraphQL path, error code, and full stack trace) is now always logged server-side via `console.error`, in every environment — only the message returned *to the client* stays masked in production. This is the standard split: log everything internally, expose nothing sensitive externally.
+
+**Files touched:** `backend/api/_app.ts`, `backend/src/index.ts`
+
+**Status:** ✅ Logging fixed and typechecked clean. **The original resolver bug causing the "Internal server error" toast is still unidentified** — it will show up clearly in Vercel's logs (search for `[GraphQL Error]`) the next time it happens, now that it's actually being recorded. Redeploy this fix, reproduce the issue again, and check the logs — that'll have the real answer.
+
+### 2026-08-22 (8) — Regression: the routing fix in (7) broke `/graphql` and `/health`
+
+**Symptom:** After deploying entry (7)'s fix, the app started showing an "Internal server error" toast, and chat/messaging appeared broken.
+
+**Root cause — I introduced this one myself.** Entry (7) renamed `backend/api/[...path].ts` → `backend/api/index.ts` and added a rewrite so `/api/:path*` resolves to it. But the *existing* rewrites for the short aliases were left pointing at their old destinations:
+```json
+{ "source": "/graphql", "destination": "/api/graphql" },
+{ "source": "/health", "destination": "/api/health" }
+```
+Those destinations (`/api/graphql`, `/api/health`) used to resolve via the bracket catch-all file that entry (7) deleted. With it gone, and with no guarantee that Vercel re-evaluates the rewrite list a second time against an already-rewritten destination, those two aliases had nowhere to resolve to — likely 404ing the same way `/api/upload/signature` did in entry (7), except this time hitting routes the whole app depends on (GraphQL itself).
+
+**Fix:** pointed all three rewrites directly at the one function (`/api/index`) instead of at intermediate destinations:
+```json
+{ "source": "/graphql", "destination": "/api/index" },
+{ "source": "/health", "destination": "/api/index" },
+{ "source": "/api/:path*", "destination": "/api/index" }
+```
+This removes any dependency on whether Vercel chains/re-evaluates rewrites — every rule now points at the same real function in one hop. It works because Express itself already registers both the prefixed and bare forms of these routes (`app.use(['/api/graphql', '/graphql'], ...)`, `app.get(['/api/health', '/health'], ...)` in `_app.ts`), and Vercel preserves the original request URL when invoking the function, so Express's own internal routing correctly handles whichever path the browser actually requested once the request arrives.
+
+**On the "chat input doesn't clear" report from the same testing pass:** reviewed the code again and it's unchanged from the fix in entry (6) — `setText('')` still runs synchronously the instant Send is clicked, before any network call. That fix is correct and typechecks clean. Given the "Internal server error" toast (an exact match for our backend's generic error string) was showing at the same time, the most likely explanation is that this testing pass happened against a build that either predates entry (6)'s frontend fix, or was caught mid-regression from this exact routing bug — **not** a new bug in the input-clearing logic itself. Needs to be re-verified after redeploying with this fix.
+
+**Files touched:** `backend/vercel.json`
+
+**Status:** ✅ Fixed and typechecked clean. Same as always — **needs a redeploy**, and this time please redeploy both the backend (for this fix) and confirm the frontend is also on the latest build (for entry (6)'s input-clearing/notification-delete/close-button fixes), since it's not yet confirmed whether the input-clearing issue is still happening on genuinely current code.
+
+### 2026-08-22 (7) — Real root cause of the persistent CORS error: Vercel's bracket catch-all only matches single-segment paths
+
+**Symptom:** Uploading a photo kept failing with an identical CORS error across three rounds of backend fixes: `blocked by CORS policy: ... No 'Access-Control-Allow-Origin' header is present`, with the preflight `OPTIONS` request to `/api/upload/signature` returning **404**.
+
+**Why the earlier fixes (entries in this log from earlier the same day) didn't resolve it:** they were all correct fixes for real, separate problems (the crash-path CORS gap, the origin-rejection CORS gap) — but none of those code paths were ever actually being hit. A 404 on the OPTIONS preflight means the request never reached Express/`cors()` at all; it was being rejected by Vercel's own routing layer, before any of our application code ran.
+
+**Actual root cause:** `backend/api/[...path].ts` used Vercel's bracket-filename catch-all convention (`[...path].ts`) to route all of `/api/*` to one function. Confirmed directly against Vercel's own team via their GitHub discussions (vercel/vercel#8343, vercel/vercel#6730): **this convention only reliably matches a single path segment for plain Node.js serverless functions** (i.e. projects not using the Next.js framework — which this backend isn't). `/api/health` (one segment: `health`) matched and worked. `/api/upload/signature` (two segments: `upload`, `signature`) didn't match and 404'd, purely because of segment count — nothing to do with CORS, the origin allowlist, or whether the code had been deployed (it had — this was verified directly from the Vercel dashboard's Source tab partway through debugging this).
+
+This was hard to pin down specifically because the symptom (a CORS error in the browser) pointed away from the real cause (a Vercel routing gap) — a 404 with no `Access-Control-Allow-Origin` header is indistinguishable, from the browser's perspective, from an actual CORS rejection.
+
+**Fix:** replaced the bracket catch-all with the pattern Vercel's own team recommends for this exact situation:
+1. Renamed `backend/api/[...path].ts` → `backend/api/index.ts` (a static filename, not a dynamic segment).
+2. Added an explicit rewrite in `backend/vercel.json`: `{ "source": "/api/:path*", "destination": "/api/index" }`, using Vercel's supported named-wildcard syntax (`:path*`, matches zero or more segments) rather than relying on filename-based inference. `:path*` correctly matches `/api/graphql`, `/api/health`, and `/api/upload/signature` uniformly, regardless of segment count.
+3. Updated the `functions` config block to reference `api/index.ts`.
+
+The function's own code didn't need to change — it always just forwarded `req`/`res` straight into the Express app, which does its own internal routing once the request actually arrives. The bug was entirely about *whether Vercel would route the request to this file in the first place*.
+
+**Files touched:** `backend/api/index.ts` (renamed from `backend/api/[...path].ts`), `backend/vercel.json`
+
+**Status:** ✅ Fixed and typechecked clean. **Requires a redeploy to take effect** — same as always, nothing here helps until it's actually live.
+
+### 2026-08-22 (6) — Three chat/notification issues from the user's testing pass
+
+**Symptom (reported by user, testing at `/messages`):**
+1. Clicking the chat icon in the navbar opens the Messages page, but there's no way to close it.
+2. Accepting or declining a friend request notification doesn't remove it from the notification list.
+3. After sending a message, the chat input field doesn't clear.
+
+**1. No way to close the Messages page.** `frontend/src/pages/Messages.tsx` is a full route (`/messages`), not a modal/popup — the only way "out" was clicking a different nav icon, which isn't an obvious "close" affordance if you think of it as a window you opened. *Fix:* added an X button next to the "New message" pencil icon in the Chats panel header that navigates back to Home (`frontend/src/pages/Messages.tsx`).
+
+**2. Friend request notification not removed after accept/decline.** Root cause: accepting/declining only ever swapped the buttons for a status label in local React state (`handledRequests`) — the underlying `Notification` document in the database was never touched. So the moment `GET_NOTIFICATIONS` refetched (which already happens after every accept/decline) or the dropdown was closed and reopened, the exact same unread notification came back with its Confirm/Delete buttons intact, since nothing had actually changed server-side. There was a `markNotificationRead` mutation already in the schema, but nothing called it, and there was no way to delete a notification outright. *Fix:* added a `deleteNotification(id: ID!): Boolean!` mutation (`backend/src/graphql/resolvers/other.resolvers.ts`, `typedefs/index.ts`) and call it right after a successful accept/decline (`frontend/src/components/Sidebar/Navbar.tsx`) — the notification is now actually gone, not just visually swapped.
+
+**3. Chat input doesn't clear after sending.** The code already called `setText('')` immediately on send in both chat implementations (`Messages.tsx` and the floating `ChatPanel.tsx`/`ChatWindow`) — that part was correct. The real bug: `catch { setText(content); }` silently restores the typed text on **any** send failure, with zero indication anything went wrong. Given the backend has had confirmed CORS/deployment connectivity issues earlier in this session, the most likely explanation is that sends were actually failing and getting silently restored — which looks exactly like "the input won't clear" from the outside, when the real problem is a failed request being swallowed. *Fix:* both `handleSend` implementations now show a toast (`Message failed to send — check your connection`, or the specific GraphQL error) on failure instead of failing silently. This doesn't fix an underlying connectivity problem if one still exists, but it means a failed send is now visibly a failed send instead of looking like a UI bug — worth confirming whether this was actually the CORS issue from entry (4) once that's resolved.
+
+**Files touched:** `backend/src/graphql/resolvers/other.resolvers.ts`, `backend/src/graphql/typedefs/index.ts`, `frontend/src/lib/graphql.ts`, `frontend/src/components/Sidebar/Navbar.tsx`, `frontend/src/pages/Messages.tsx`, `frontend/src/components/Chat/ChatPanel.tsx`
+
+**Status:** ✅ All three fixed and typechecked clean. #3 is a symptom fix (surfacing the error) — if sends are still actually failing due to the unresolved CORS/deployment issue, the underlying cause is tracked in entry (4).
+
+### 2026-08-22 (5) — Profile "Photos" tab was a hardcoded placeholder
+
+**Symptom (reported by user):** Photos clearly exist on a profile (visible in the Posts tab), but the Photos tab always shows nothing.
+
+**Root cause:** `frontend/src/pages/Profile.tsx`'s Photos tab wasn't broken so much as never built — it was a static `<p>Photos from posts will appear here.</p>` with no query behind it at all, same class of gap as the earlier "Coming Soon" nav placeholders. Unlike those, this one was worth building for real since it's small, self-contained, and sits inside a page where every other tab already works — leaving it as a placeholder there was more confusing than helpful.
+
+**Fix — added a real photo grid backed by actual data:**
+1. `backend/src/graphql/typedefs/index.ts` / `post.resolvers.ts` — added a `userPhotos(userId, cursor, limit)` query, same shape and pagination as the existing `userPosts`, but filtered to `{ 'media.0': { $exists: true } }` at the database level (posts with at least one photo/video). Filtering here rather than fetching `userPosts` and filtering client-side keeps pagination correct — a page of "posts with photos" isn't skewed by text-only posts silently eating slots in the limit. Reuses the exact same visibility rules as `userPosts` (owner sees everything, friends see PUBLIC+FRIENDS, everyone else sees PUBLIC only), so it doesn't leak anything the Posts tab wouldn't already show.
+2. `frontend/src/lib/graphql.ts` — added `GET_USER_PHOTOS`, requesting only the fields the grid needs (not the full post fragment, since we're flattening many posts' media into thumbnails, not rendering post cards).
+3. `frontend/src/pages/Profile.tsx` — Photos tab now flattens every post's `media[]` into a responsive thumbnail grid, videos get a play-icon overlay, tiles open the original file in a new tab, includes a loading skeleton, an empty state, and a "Load more" button using the same cursor-pagination pattern as the Posts tab.
+
+**Files touched:** `backend/src/graphql/typedefs/index.ts`, `backend/src/graphql/resolvers/post.resolvers.ts`, `frontend/src/lib/graphql.ts`, `frontend/src/pages/Profile.tsx`
+
+**Status:** ✅ Fixed and typechecked clean.
+
+### 2026-08-22 (4) — Photo upload CORS error on Vercel masked the real failure
+
+**Symptom (reported by user):** Uploading a photo in production threw a browser CORS error: `Access to fetch at 'https://<backend>.vercel.app/api/upload/signature' ... has been blocked by CORS policy: ... No 'Access-Control-Allow-Origin' header is present`.
+
+**Root cause — not actually a CORS misconfiguration.** `backend/api/[...path].ts` (the Vercel serverless entrypoint) wraps the whole Express app in a `try/catch`. If `getApp()` throws for **any** reason during startup, the `catch` block sends back a 500 response — but since Express (and its `cors()` middleware) never got a chance to run, that response has **zero CORS headers on it, regardless of what `FRONTEND_URL` is set to.** The browser then reports this exactly as "no Access-Control-Allow-Origin header," which looks identical to a real CORS misconfiguration but is actually masking a server-startup crash. Since this route was newly added (Cloudinary), the most likely culprit is the deployed backend not yet having redeployed to pick up the new `cloudinary` dependency, or another env-var/startup issue — **check the Vercel function logs for the backend project to see the actual error** (search for `❌ Failed to initialize app:`).
+
+**Fix:** `backend/api/[...path].ts`'s error handler now sets `Access-Control-Allow-Origin` (echoing the request's `Origin` header) before sending the 500, and includes the real error message in the JSON body (`detail`). This doesn't change behavior for any request that succeeds — it only affects the failure path, and it means any future startup crash (bad env var, missing dependency, DB connection failure, etc.) shows up as a real, readable error in the browser's network tab instead of a misleading CORS message that sends you looking in the wrong place.
+
+**What to check on your live deployment right now:**
+1. Redeploy the backend on Vercel — the new `cloudinary` dependency needs a fresh `npm install`, which only happens on a new deployment, not automatically for existing ones.
+2. Set `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET` in the backend's Vercel project → Settings → Environment Variables, then redeploy (env var changes need a redeploy to take effect).
+3. Double-check `FRONTEND_URL` on the backend project exactly matches your deployed frontend origin (`https://pulse-connect-indol.vercel.app`, no trailing slash — comma-separate if there's more than one, e.g. a preview + production URL).
+4. After redeploying with the fix above, if it fails again the browser will now show the *actual* error instead of a CORS message — check the response body / Vercel function logs for specifics.
+
+**Files touched:** `backend/api/[...path].ts`
+
+**Status:** ✅ Error handling fixed and typechecked clean. **Requires a redeploy on your end to take effect and reveal the real underlying error, if any remains.**
+
+### 2026-08-22 (3) — Profile page "Message" button opened nothing for anyone you hadn't already messaged
+
+**Symptom (found while investigating the user's "chat window has no close button" report):** Clicking "Message" on someone's profile did nothing visible — no chat window appeared, no error. Investigating this turned out to be unrelated to the close button at all.
+
+**Root cause:** `frontend/src/pages/Profile.tsx`'s Message button called `openChat(profile.id)` — passing the **user's** id. But `ChatPanel` looks up the chat window by matching that id against your existing conversations (`conversations.find(c => c.id === activeChatId)`), which expects a **conversation** id, not a user id. Unless you'd coincidentally already messaged that exact person before (vanishingly unlikely — Mongo ObjectIds don't collide with each other), the lookup always failed and `ChatPanel` silently returned `null` — nothing rendered, no error, just apparent silence. (`RightSidebar.tsx`'s "online friends" list, by contrast, already passed a real `conversation.id`, so chats opened from there worked correctly — this bug was isolated to the Profile page entry point.)
+
+**Fix — added proper support for starting a new conversation, rather than a workaround:**
+1. `backend/src/graphql/resolvers/message.resolvers.ts` — added a `Message.conversation` field resolver (same missing-resolver pattern as `User.friends` and `Post.tags`); needed so the frontend can learn the new conversation's id right after the first message creates it.
+2. `frontend/src/store/index.ts` — the UI store's chat state now distinguishes "open an existing conversation" (`openChat(conversationId)`, unchanged, still what `RightSidebar` uses) from "open a chat with this *person*, conversation may not exist yet" (new `openChatWithUser(recipient)`).
+3. `frontend/src/components/Chat/ChatPanel.tsx` — when opened via `openChatWithUser`, checks `conversationWithUser` for an existing conversation first; if found, normalizes to the regular flow. If not, renders the chat window in a "pending" state (`conversationId: null`) — message history/typing/read-receipts are skipped, and the first message sent uses `sendMessage({ recipientId })` (the backend already supported lazily creating a conversation this way — it just had no way to be triggered from the UI). Once that first message succeeds, the window is promoted to the real conversation id.
+4. `frontend/src/pages/Profile.tsx` — Message button now calls `openChatWithUser({...})` with the profile's info instead of the broken `openChat(profile.id)`.
+
+**Files touched:** `backend/src/graphql/resolvers/message.resolvers.ts`, `frontend/src/lib/graphql.ts`, `frontend/src/store/index.ts`, `frontend/src/components/Chat/ChatPanel.tsx`, `frontend/src/pages/Profile.tsx`
+
+**Status:** ✅ Fixed and typechecked clean. **Note:** this does not yet close out the user's original "close button" report — see "Open items" below.
 
 ### 2026-08-22 (2) — `Post.tags` — same "unpopulated list, no field resolver" bug as `User.friends`
 
@@ -336,15 +627,6 @@ Running log of gaps found during review, kept up to date as issues are found and
 
 **Status:** ✅ Notification accept/decline fixed and typechecked. Photo/Video upload: see entry (4) for the production-ready version.
 
-### Open items to verify next
-- [ ] **Chat popup close button** — user reports the floating chat window (`ChatPanel`/`ChatWindow`) has no way to close it. Deferred at their request. Note for whoever picks this up: the code as currently written *does* have a close button (`aria-label="Close chat"`, wired to `closeChat()` in the UI store, which unmounts the panel) — so this needs a fresh repro/screenshot before diagnosing further, since the described symptom doesn't match what's in the code. Possibilities to check: a stale build, a CSS z-index/overflow issue hiding the button, or a different chat entry point than `ChatPanel.tsx`.
-- [ ] Build real Friends / Watch / Marketplace / Saved / Events / Settings pages — currently "Coming Soon" placeholders (see 2026-08-22 (1)). No backend schema exists yet for marketplace listings, videos, events, or saved posts, so this is new feature work each time, not a quick fix.
-- [ ] Notification click-through (tapping a non-friend-request notification, e.g. `POST_LIKE`/`POST_COMMENT`, to navigate to the relevant post) is still not implemented — only the friend-request action buttons were added.
-- [x] ~~Audit other non-nullable `User!`/`Post!` list fields for the same "lean doc without a field resolver" pattern~~ — done for `Post.tags` (2026-08-22 (2)); `Reaction.user`, `Comment.author`, and `Conversation.participants` were checked and are already populated/resolved correctly everywhere they're used.
-- [ ] No automated test currently guards against a populated-list field silently returning `null`; consider a resolver-level integration test for `GET_USER` with a seeded user that has friends, and one for `feed`/`post` with a seeded post that has tags.
-- [ ] Avatar component has no visual regression/story coverage, so size-variant mismatches like this aren't caught until manual QA.
-- [ ] Uploaded media currently has no server-side validation beyond what Cloudinary's client SDK enforces (file type/size); consider an `eager` transformation or moderation add-on if user-generated content moderation becomes a concern.
-
 ### 2026-08-21 (1) — Profile page: avatar off-center + Friends tab empty despite correct count
 
 **Symptom:** On `/profile/:username`, the avatar photo rendered small and shifted toward the top-left corner of its circular frame instead of filling it, and the Friends tab showed "No friends to show" even though the header correctly read "9 friends".
@@ -358,3 +640,5 @@ Running log of gaps found during review, kept up to date as issues are found and
 **Files touched:** `frontend/src/components/UI/Avatar.tsx`, `frontend/src/pages/Profile.tsx`, `backend/src/graphql/resolvers/auth.resolvers.ts`
 
 **Status:** ✅ Fixed, typechecked clean on both `frontend` and `backend`.
+
+</details>
